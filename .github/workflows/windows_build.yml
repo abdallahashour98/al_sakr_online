@@ -9,6 +9,9 @@ jobs:
     runs-on: windows-latest # هنا نطلب من جيت هاب توفير سيرفر ويندوز
 
     steps:
+    - name: Enable Long Paths
+      run: git config --system core.longpaths true
+      
     - name: Checkout code
       uses: actions/checkout@v3
 
