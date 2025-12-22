@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "955568888176",
+    "firebase_url": "https://al-sakr-default-rtdb.firebaseio.com",
+    "project_id": "al-sakr",
+    "storage_bucket": "al-sakr.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:955568888176:android:17344da00a97a03fc617b5",
+        "android_client_info": {
+          "package_name": "com.example.accounting_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArEsMgTImm-B_5zPbukVqnQYnZnX_xmew"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,216 @@
+Time: 2025-12-19 17:42:31.229167
+Error: SqfliteFfiException(sqlite_error: 1, , SqliteException(1): while preparing statement, no such column: s.clientName, SQL logic error (code 1)
+  Causing statement (at position 18):       SELECT r.*, s.clientName 
+      FROM returns r
+      LEFT JOIN sales s ON r.saleId = s.id
+      ORDER BY r.date DESC
+    }) DatabaseException(SqliteException(1): while preparing statement, no such column: s.clientName, SQL logic error (code 1)
+  Causing statement (at position 18):       SELECT r.*, s.clientName 
+      FROM returns r
+      LEFT JOIN sales s ON r.saleId = s.id
+      ORDER BY r.date DESC
+    ) sql '      SELECT r.*, s.clientName 
+      FROM returns r
+      LEFT JOIN sales s ON r.saleId = s.id
+      ORDER BY r.date DESC
+    ' {details: {database: {path: /home/boody/development/al-sakr/.dart_tool/sqflite_common_ffi/databases/SmartAccountingDB.db, id: 1, readOnly: false, singleInstance: true}}}
+Stack: #0      responseToResultOrThrow (package:sqflite_common_ffi/src/method_call.dart:125:9)
+#1      SqfliteIsolate.handle (package:sqflite_common_ffi/src/isolate.dart:35:12)
+<asynchronous suspension>
+#2      _isolateHandle (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:106:10)
+<asynchronous suspension>
+#3      ffiMethodCallhandleInIsolate (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:59:18)
+<asynchronous suspension>
+#4      _SqfliteDatabaseFactoryImpl.invokeMethod (package:sqflite_common/src/mixin/factory.dart:22:8)
+<asynchronous suspension>
+#5      SqfliteDatabaseMixin.txnRawQuery.<anonymous closure> (package:sqflite_common/src/database_mixin.dart:678:30)
+<asynchronous suspension>
+#6      BasicLock.synchronized (package:synchronized/src/basic_lock.dart:38:16)
+<asynchronous suspension>
+#7      SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:589:14)
+<asynchronous suspension>
+#8      DatabaseHelper.getAllReturns (package:al_sakr/db_helper.dart:449:12)
+<asynchronous suspension>
+#9      _ReturnsListScreenState._loadReturns (package:al_sakr/returns_list_screen.dart:22:18)
+<asynchronous suspension>
+
+
+Time: 2025-12-19 18:43:55.299458
+Error: SqfliteFfiException(sqlite_error: 1, , SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)}) DatabaseException(SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)) sql 'INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)' args [mouse k300, 1, , mouse, 100.0, 150.0, 120.0, 2, 1, ] {details: {database: {path: /home/boody/development/al-sakr/.dart_tool/sqflite_common_ffi/databases/SmartAccountingDB.db, id: 1, readOnly: false, singleInstance: true}}}
+Stack: #0      responseToResultOrThrow (package:sqflite_common_ffi/src/method_call.dart:125:9)
+#1      SqfliteIsolate.handle (package:sqflite_common_ffi/src/isolate.dart:35:12)
+<asynchronous suspension>
+#2      _isolateHandle (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:106:10)
+<asynchronous suspension>
+#3      ffiMethodCallhandleInIsolate (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:59:18)
+<asynchronous suspension>
+#4      _SqfliteDatabaseFactoryImpl.invokeMethod (package:sqflite_common/src/mixin/factory.dart:22:8)
+<asynchronous suspension>
+#5      SqfliteDatabaseMixin.txnRawInsert.<anonymous closure> (package:sqflite_common/src/database_mixin.dart:663:14)
+<asynchronous suspension>
+#6      BasicLock.synchronized (package:synchronized/src/basic_lock.dart:38:16)
+<asynchronous suspension>
+#7      SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:589:14)
+<asynchronous suspension>
+#8      DatabaseHelper.insertProduct (package:al_sakr/db_helper.dart:361:7)
+<asynchronous suspension>
+#9      _StoreScreenState._showProductDialog.<anonymous closure>.<anonymous closure>.<anonymous closure> (package:al_sakr/store_screen.dart:588:21)
+<asynchronous suspension>
+
+
+Time: 2025-12-19 18:49:46.781564
+Error: SqfliteFfiException(sqlite_error: 1, , SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)}) DatabaseException(SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)) sql 'INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)' args [mouse k 300, 1, , mouse, 150.0, 200.0, 180.0, 5, 1, ] {details: {database: {path: /home/boody/development/al-sakr/.dart_tool/sqflite_common_ffi/databases/SmartAccountingDB.db, id: 1, readOnly: false, singleInstance: true}}}
+Stack: #0      responseToResultOrThrow (package:sqflite_common_ffi/src/method_call.dart:125:9)
+#1      SqfliteIsolate.handle (package:sqflite_common_ffi/src/isolate.dart:35:12)
+<asynchronous suspension>
+#2      _isolateHandle (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:106:10)
+<asynchronous suspension>
+#3      ffiMethodCallhandleInIsolate (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:59:18)
+<asynchronous suspension>
+#4      _SqfliteDatabaseFactoryImpl.invokeMethod (package:sqflite_common/src/mixin/factory.dart:22:8)
+<asynchronous suspension>
+#5      SqfliteDatabaseMixin.txnRawInsert.<anonymous closure> (package:sqflite_common/src/database_mixin.dart:663:14)
+<asynchronous suspension>
+#6      BasicLock.synchronized (package:synchronized/src/basic_lock.dart:38:16)
+<asynchronous suspension>
+#7      SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:589:14)
+<asynchronous suspension>
+#8      DatabaseHelper.insertProduct (package:al_sakr/db_helper.dart:361:7)
+<asynchronous suspension>
+#9      _StoreScreenState._showProductDialog.<anonymous closure>.<anonymous closure>.<anonymous closure> (package:al_sakr/store_screen.dart:588:21)
+<asynchronous suspension>
+
+
+Time: 2025-12-19 18:52:31.777611
+Error: SqfliteFfiException(sqlite_error: 1, , SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)}) DatabaseException(SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)) sql 'INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)' args [11, 1, , keyboard, 100.0, 150.0, 120.0, 5, 3, ] {details: {database: {path: /home/boody/development/al-sakr/.dart_tool/sqflite_common_ffi/databases/SmartAccountingDB.db, id: 1, readOnly: false, singleInstance: true}}}
+Stack: #0      responseToResultOrThrow (package:sqflite_common_ffi/src/method_call.dart:125:9)
+#1      SqfliteIsolate.handle (package:sqflite_common_ffi/src/isolate.dart:35:12)
+<asynchronous suspension>
+#2      _isolateHandle (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:106:10)
+<asynchronous suspension>
+#3      ffiMethodCallhandleInIsolate (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:59:18)
+<asynchronous suspension>
+#4      _SqfliteDatabaseFactoryImpl.invokeMethod (package:sqflite_common/src/mixin/factory.dart:22:8)
+<asynchronous suspension>
+#5      SqfliteDatabaseMixin.txnRawInsert.<anonymous closure> (package:sqflite_common/src/database_mixin.dart:663:14)
+<asynchronous suspension>
+#6      BasicLock.synchronized (package:synchronized/src/basic_lock.dart:38:16)
+<asynchronous suspension>
+#7      SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:589:14)
+<asynchronous suspension>
+#8      DatabaseHelper.insertProduct (package:al_sakr/db_helper.dart:399:7)
+<asynchronous suspension>
+#9      _StoreScreenState._showProductDialog.<anonymous closure>.<anonymous closure>.<anonymous closure> (package:al_sakr/store_screen.dart:588:21)
+<asynchronous suspension>
+
+
+Time: 2025-12-19 18:56:03.563774
+Error: SqfliteFfiException(sqlite_error: 1, , SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)}) DatabaseException(SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)) sql 'INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)' args [11, 1, , mouse, 100.0, 150.0, 120.0, 5, 2, , 2027-03-03 00:00:00.000] {details: {database: {path: /home/boody/development/al-sakr/.dart_tool/sqflite_common_ffi/databases/SmartAccountingDB.db, id: 1, readOnly: false, singleInstance: true}}}
+Stack: #0      responseToResultOrThrow (package:sqflite_common_ffi/src/method_call.dart:125:9)
+#1      SqfliteIsolate.handle (package:sqflite_common_ffi/src/isolate.dart:35:12)
+<asynchronous suspension>
+#2      _isolateHandle (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:106:10)
+<asynchronous suspension>
+#3      ffiMethodCallhandleInIsolate (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:59:18)
+<asynchronous suspension>
+#4      _SqfliteDatabaseFactoryImpl.invokeMethod (package:sqflite_common/src/mixin/factory.dart:22:8)
+<asynchronous suspension>
+#5      SqfliteDatabaseMixin.txnRawInsert.<anonymous closure> (package:sqflite_common/src/database_mixin.dart:663:14)
+<asynchronous suspension>
+#6      BasicLock.synchronized (package:synchronized/src/basic_lock.dart:38:16)
+<asynchronous suspension>
+#7      SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:589:14)
+<asynchronous suspension>
+#8      DatabaseHelper.insertProduct (package:al_sakr/db_helper.dart:399:7)
+<asynchronous suspension>
+#9      _StoreScreenState._showProductDialog.<anonymous closure>.<anonymous closure>.<anonymous closure> (package:al_sakr/store_screen.dart:588:21)
+<asynchronous suspension>
+
+
+Time: 2025-12-19 18:57:37.400466
+Error: SqfliteFfiException(sqlite_error: 1, , SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)}) DatabaseException(SqliteException(1): while preparing statement, table products has no column named expiryDate, SQL logic error (code 1)
+  Causing statement: INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)) sql 'INSERT INTO products (name, code, barcode, unit, buyPrice, sellPrice, minSellPrice, stock, reorderLevel, supplierId, notes, expiryDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)' args [1, 1, , screen, 111.0, 11.0, 11.0, 1, 2, ] {details: {database: {path: /home/boody/development/al-sakr/.dart_tool/sqflite_common_ffi/databases/SmartAccountingDB.db, id: 1, readOnly: false, singleInstance: true}}}
+Stack: #0      responseToResultOrThrow (package:sqflite_common_ffi/src/method_call.dart:125:9)
+#1      SqfliteIsolate.handle (package:sqflite_common_ffi/src/isolate.dart:35:12)
+<asynchronous suspension>
+#2      _isolateHandle (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:106:10)
+<asynchronous suspension>
+#3      ffiMethodCallhandleInIsolate (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:59:18)
+<asynchronous suspension>
+#4      _SqfliteDatabaseFactoryImpl.invokeMethod (package:sqflite_common/src/mixin/factory.dart:22:8)
+<asynchronous suspension>
+#5      SqfliteDatabaseMixin.txnRawInsert.<anonymous closure> (package:sqflite_common/src/database_mixin.dart:663:14)
+<asynchronous suspension>
+#6      BasicLock.synchronized (package:synchronized/src/basic_lock.dart:38:16)
+<asynchronous suspension>
+#7      SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:589:14)
+<asynchronous suspension>
+#8      DatabaseHelper.insertProduct (package:al_sakr/db_helper.dart:399:7)
+<asynchronous suspension>
+#9      _StoreScreenState._showProductDialog.<anonymous closure>.<anonymous closure>.<anonymous closure> (package:al_sakr/store_screen.dart:588:21)
+<asynchronous suspension>
+
+
+Time: 2025-12-19 21:43:00.762197
+Error: SqfliteFfiException(sqlite_error: 1, , SqliteException(1): while preparing statement, no such table: client_payments, SQL logic error (code 1)
+  Causing statement: INSERT INTO client_payments (clientId, amount, date, notes, type) VALUES (?, ?, ?, ?, ?)}) DatabaseException(SqliteException(1): while preparing statement, no such table: client_payments, SQL logic error (code 1)
+  Causing statement: INSERT INTO client_payments (clientId, amount, date, notes, type) VALUES (?, ?, ?, ?, ?)) sql 'INSERT INTO client_payments (clientId, amount, date, notes, type) VALUES (?, ?, ?, ?, ?)' args [1, 150.0, 2025-12-19 21:38:12.060259, صرف نقدية عن مرتجع #1, payment] {details: {database: {path: /home/boody/development/al-sakr/.dart_tool/sqflite_common_ffi/databases/SmartAccountingDB.db, id: 1, readOnly: false, singleInstance: true}}}
+Stack: #0      responseToResultOrThrow (package:sqflite_common_ffi/src/method_call.dart:125:9)
+#1      SqfliteIsolate.handle (package:sqflite_common_ffi/src/isolate.dart:35:12)
+<asynchronous suspension>
+#2      _isolateHandle (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:106:10)
+<asynchronous suspension>
+#3      ffiMethodCallhandleInIsolate (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:59:18)
+<asynchronous suspension>
+#4      _SqfliteDatabaseFactoryImpl.invokeMethod (package:sqflite_common/src/mixin/factory.dart:22:8)
+<asynchronous suspension>
+#5      SqfliteDatabaseMixin.txnRawInsert.<anonymous closure> (package:sqflite_common/src/database_mixin.dart:663:14)
+<asynchronous suspension>
+#6      BasicLock.synchronized (package:synchronized/src/basic_lock.dart:38:16)
+<asynchronous suspension>
+#7      SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:589:14)
+<asynchronous suspension>
+#8      _ReturnsListScreenState._processCashRefund.<anonymous closure>.<anonymous closure> (package:al_sakr/returns_list_screen.dart:114:15)
+<asynchronous suspension>
+
+
+Time: 2025-12-20 11:45:18.760148
+Error: SqfliteFfiException(sqlite_error: 1, , SqliteException(1): while preparing statement, table sales has no column named paymentType, SQL logic error (code 1)
+  Causing statement: INSERT INTO sales (clientId, storedClientName, date, totalAmount, discount, taxAmount, netAmount, referenceNumber, paymentType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)}) DatabaseException(SqliteException(1): while preparing statement, table sales has no column named paymentType, SQL logic error (code 1)
+  Causing statement: INSERT INTO sales (clientId, storedClientName, date, totalAmount, discount, taxAmount, netAmount, referenceNumber, paymentType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)) sql 'INSERT INTO sales (clientId, storedClientName, date, totalAmount, discount, taxAmount, netAmount, referenceNumber, paymentType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)' args [5, test4, 2025-12-20 11:41:35.148874, 500.0, 0.0, 70.0, 570.0, , cash] {details: {database: {path: /home/boody/development/al-sakr/.dart_tool/sqflite_common_ffi/databases/SmartAccountingDB.db, id: 1, readOnly: false, singleInstance: true}}}
+Stack: #0      responseToResultOrThrow (package:sqflite_common_ffi/src/method_call.dart:125:9)
+#1      SqfliteIsolate.handle (package:sqflite_common_ffi/src/isolate.dart:35:12)
+<asynchronous suspension>
+#2      _isolateHandle (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:106:10)
+<asynchronous suspension>
+#3      ffiMethodCallhandleInIsolate (package:sqflite_common_ffi/src/database_factory_ffi_io.dart:59:18)
+<asynchronous suspension>
+#4      _SqfliteDatabaseFactoryImpl.invokeMethod (package:sqflite_common/src/mixin/factory.dart:22:8)
+<asynchronous suspension>
+#5      SqfliteDatabaseMixin.txnRawInsert.<anonymous closure> (package:sqflite_common/src/database_mixin.dart:663:14)
+<asynchronous suspension>
+#6      SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:554:16)
+<asynchronous suspension>
+#7      DatabaseHelper.createSale.<anonymous closure> (package:al_sakr/db_helper.dart:518:20)
+<asynchronous suspension>
+#8      SqfliteDatabaseMixinExt._txnTransaction (package:sqflite_common/src/database_mixin.dart:388:16)
+<asynchronous suspension>
+#9      BasicLock.synchronized (package:synchronized/src/basic_lock.dart:38:16)
+<asynchronous suspension>
+#10     SqfliteDatabaseMixin.txnSynchronized (package:sqflite_common/src/database_mixin.dart:589:14)
+<asynchronous suspension>
+#11     DatabaseHelper.createSale (package:al_sakr/db_helper.dart:514:5)
+<asynchronous suspension>
+#12     _SalesScreenState._saveInvoice (package:al_sakr/sales_screen.dart:739:5)
+<asynchronous suspension>
+
+
