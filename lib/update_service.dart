@@ -1,56 +1,71 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:http/http.dart' as http; // 👈 المكتبة الجديدة
+import 'dart:convert'; // 👈 عشان نفك تشفير البيانات الراجعة
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class UpdateService {
-  // مرجع لقاعدة البيانات
-  final DatabaseReference _dbRef = FirebaseDatabase.instance.ref('app_update');
+  // 👇 1. ضع رابط قاعدة البيانات الخاص بك هنا
+  // هتلاقيه في الفايربيس كونسول في صفحة Realtime Database من فوق
+  // ومهم جداً تزود في آخره كلمة ".json"
+  final String databaseUrl =
+      "https://al-sakr-default-rtdb.firebaseio.com/app_update.json";
 
   Future<void> checkForUpdate(BuildContext context) async {
     try {
-      // 1. قراءة البيانات من فايربيس
-      final snapshot = await _dbRef.get();
+      // 2. قراءة البيانات باستخدام رابط إنترنت عادي (يعمل على الويندوز والكل)
+      final response = await http.get(Uri.parse(databaseUrl));
 
-      if (snapshot.exists) {
-        final data = snapshot.value as Map;
-        String serverVersion = data['latest_version'];
-        String downloadUrl = data['download_url'];
-        String notes = data['release_notes'] ?? 'تحديث جديد متاح لتحسين الأداء';
+      if (response.statusCode == 200 && response.body.isNotEmpty) {
+        // تحويل النص الراجع إلى Map
+        final data = json.decode(response.body);
 
-        // 2. معرفة إصدار التطبيق الحالي
-        PackageInfo packageInfo = await PackageInfo.fromPlatform();
-        String currentVersion = packageInfo.version;
+        // التحقق أن البيانات ليست فارغة (null)
+        if (data != null) {
+          String serverVersion = data['latest_version'].toString();
+          String downloadUrl = data['download_url'].toString();
+          String notes =
+              data['release_notes'] ?? 'تحديث جديد متاح لتحسين الأداء';
 
-        print("Current: $currentVersion | Server: $serverVersion");
+          // 3. معرفة إصدار التطبيق الحالي
+          PackageInfo packageInfo = await PackageInfo.fromPlatform();
+          String currentVersion = packageInfo.version;
 
-        // 3. المقارنة (لو الإصدار الجديد مختلف عن الحالي)
-        if (_isNewer(serverVersion, currentVersion)) {
-          if (context.mounted) {
-            _showUpdateDialog(context, serverVersion, notes, downloadUrl);
-          }
-        } else {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('البرنامج محدث لآخر إصدار ✅')),
-            );
+          print("Current: $currentVersion | Server: $serverVersion");
+
+          // 4. المقارنة
+          if (_isNewer(serverVersion, currentVersion)) {
+            if (context.mounted) {
+              _showUpdateDialog(context, serverVersion, notes, downloadUrl);
+            }
+          } else {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('البرنامج محدث لآخر إصدار ✅'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
           }
         }
+      } else {
+        throw "فشل الاتصال بقاعدة البيانات (Status: ${response.statusCode})";
       }
     } catch (e) {
       print("Error checking update: $e");
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('فشل التحقق من التحديثات: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('فشل التحقق من التحديثات: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
 
-  // دالة بسيطة لمقارنة الأرقام
   bool _isNewer(String server, String current) {
-    // هذه طريقة مبسطة، يفضل استخدام مكتبة pub_semver للمقارنة الدقيقة
-    // لكن بما أنك المتحكم، فقط تأكد أن ترفع الرقم دائماً
     return server != current;
   }
 
@@ -64,8 +79,8 @@ class UpdateService {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             Icon(Icons.system_update, color: Colors.blue),
             SizedBox(width: 10),
             Text('تحديث جديد متاح'),
