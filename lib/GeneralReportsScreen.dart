@@ -140,7 +140,7 @@ class _GeneralReportsScreenState extends State<GeneralReportsScreen> {
                   const SizedBox(height: 25),
 
                   // ================= القسم الثاني: النشاط التجاري (Accrual) =================
-                  _buildSectionHeader("نشاط المحل (فواتير وبضاعة) هذا الشهر"),
+                  _buildSectionHeader("نشاط الشركة (فواتير وبضاعة) هذا الشهر"),
                   // هنا بنعرض حجم الشغل بغض النظر عن الدفع
                   _buildListTileCard(
                     title: "إجمالي قيمة المبيعات",

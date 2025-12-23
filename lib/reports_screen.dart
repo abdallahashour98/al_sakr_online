@@ -107,7 +107,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     Color profitColor = _monthlyNetProfit >= 0 ? Colors.green : Colors.red;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('تقرير المبيعات (تفصيلي)')),
+      appBar: AppBar(title: const Text('سجل المبيعات (تفصيلي)')),
       body: Column(
         children: [
           // 1️⃣ الشريط العلوي (إجمالي الصافي وعدد الفواتير)

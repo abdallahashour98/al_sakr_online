@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart'; // السطر ده لازم يكون موجود
+import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -10,10 +11,6 @@ class DatabaseHelper {
 
   static Database? _database;
   final String _dbName = 'SmartAccountingDB.db';
-
-  // 🔥 (1) لازم نرفع الرقم ده عن النسخة اللي عند العملاء حالياً
-  // لو العملاء عندهم نسخة 14، خلي دي 15 أو 16.
-  // كل ما تعمل تعديل في الجداول، زود الرقم ده 1.
   final int _dbVersion = 2;
 
   // Getter للرقم عشان شاشة الإعدادات
@@ -26,22 +23,20 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    final Directory appSupportDir = await getApplicationSupportDirectory();
-    final String path = join(appSupportDir.path, _dbName);
-  if (Platform.isWindows || Platform.isLinux) {
+    if (Platform.isWindows || Platform.isLinux) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
-    // 2. إنشاء المجلد برمجياً لضمان عدم حدوث خطأ SqliteException 14
-    final dir = Directory(dirname(path));
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
+
+    // 2. الحصول على المسار الموحد
+    final String path = await getDbPath();
+
+    // 3. فتح قاعدة البيانات
     return await openDatabase(
       path,
       version: _dbVersion,
-      onCreate: _onCreate, // بتشتغل للمستخدم الجديد بس
-      onUpgrade: _onUpgrade, // بتشتغل للمستخدم القديم (ده المهم ليك)
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
       onDowngrade: onDatabaseDowngradeDelete,
     );
   }
@@ -1297,5 +1292,24 @@ class DatabaseHelper {
         );
       }
     });
+  }
+
+  Future<String> getDbPath() async {
+    Directory dir;
+    // لو كمبيوتر (ويندوز/لينكس) نحفظ في المستندات عشان تكون ظاهرة وسهلة
+    if (Platform.isWindows || Platform.isLinux) {
+      dir = await getApplicationDocumentsDirectory();
+      dir = Directory(join(dir.path, 'AlSakr_Data')); // مجلد خاص بالبرنامج
+    } else {
+      // لو موبايل (أندرويد)
+      dir = await getApplicationDocumentsDirectory(); // أو getDatabasesPath()
+    }
+
+    // التأكد من وجود المجلد
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+
+    return join(dir.path, _dbName);
   }
 }

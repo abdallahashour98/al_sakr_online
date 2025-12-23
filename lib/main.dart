@@ -4,14 +4,28 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'dart:io';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // متغير التحكم في الثيم
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.system);
 Future<void> main() async {
   // تأكد من تهيئة Flutter قبل Sentry
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  if (Platform.isWindows || Platform.isLinux) {
+    sqfliteFfiInit(); // تهيئة FFI
+    databaseFactory = databaseFactoryFfi; // ضبط المصنع لاستخدام FFI
+  }
 
+  if (!Platform.isLinux) {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } catch (e) {
+      print("Firebase Init Error: $e");
+    }
+  }
   await SentryFlutter.init((options) {
     options.dsn =
         'https://4426bbe641559b2c132709beb785383b@o4510569137700864.ingest.us.sentry.io/4510569148252160'; // استبدل هذا بالرابط الخاص بك من موقع Sentry

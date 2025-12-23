@@ -18,7 +18,7 @@ class BackupService {
     try {
       // 🔥 تصحيح المسار: استخدام نفس مسار db_helper 🔥
       final appDir = await getApplicationSupportDirectory();
-      String dbPath = p.join(appDir.path, _dbName);
+      String dbPath = await DatabaseHelper().getDbPath();
       final dbFile = File(dbPath);
 
       // تحديد مسار مجلد الصور
@@ -66,7 +66,9 @@ class BackupService {
 
       // مشاركة الملف أو حفظه
       if (Platform.isAndroid || Platform.isIOS) {
-        await Share.shareXFiles([XFile(zipPath)], text: 'نسخة احتياطية شاملة (AL-SAKR)');
+        await Share.shareXFiles([
+          XFile(zipPath),
+        ], text: 'نسخة احتياطية شاملة (AL-SAKR)');
       } else {
         String? outputFile = await FilePicker.platform.saveFile(
           dialogTitle: 'حفظ النسخة الاحتياطية',
@@ -97,7 +99,10 @@ class BackupService {
       print("Export Error: $e");
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('فشل التصدير: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('فشل التصدير: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
       return false;
@@ -121,7 +126,7 @@ class BackupService {
 
         // 🔥 تصحيح المسار: استخدام نفس مسار db_helper 🔥
         final appDir = await getApplicationSupportDirectory();
-        String dbPath = p.join(appDir.path, _dbName);
+        String dbPath = await DatabaseHelper().getDbPath();
         final imagesDestDir = Directory('${appDir.path}/product_images');
 
         // إغلاق وحذف قاعدة البيانات القديمة
@@ -172,8 +177,13 @@ class BackupService {
             context: context,
             barrierDismissible: false,
             builder: (ctx) => AlertDialog(
-              title: const Text('تمت الاستعادة بنجاح', style: TextStyle(color: Colors.green)),
-              content: const Text('تم استرجاع البيانات والصور.\nيرجى إعادة تشغيل التطبيق لتطبيق التغييرات.'),
+              title: const Text(
+                'تمت الاستعادة بنجاح',
+                style: TextStyle(color: Colors.green),
+              ),
+              content: const Text(
+                'تم استرجاع البيانات والصور.\nيرجى إعادة تشغيل التطبيق لتطبيق التغييرات.',
+              ),
               actions: [
                 ElevatedButton(
                   onPressed: () => exit(0),

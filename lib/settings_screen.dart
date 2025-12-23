@@ -1,8 +1,10 @@
+import 'dart:io'; // 🆕 ضروري عشان نعرف إحنا على لينكس ولا ويندوز
 import 'package:flutter/material.dart';
 import 'excel_service.dart';
 import 'backup_service.dart';
-import 'db_helper.dart'; // 🆕 ضروري عشان نجيب رقم الإصدار
-import 'main.dart'; // ضروري للوصول إلى themeNotifier
+import 'update_service.dart'; // 🆕 استدعاء كلاس التحديث
+import 'db_helper.dart';
+import 'main.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -14,20 +16,19 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLoading = false;
 
-  // 🆕 متغيرات الإصدار
+  // متغيرات الإصدار
   int _dbVer = 0;
-  final String _appVersion = "1.0.0";
+  final String _appVersion =
+      "1.0.1"; // 👈 يفضل تحديثه يدوياً ليتطابق مع pubspec.yaml
 
   @override
   void initState() {
     super.initState();
-    _getDbVersion(); // 🆕 جلب الإصدار أول ما الشاشة تفتح
+    _getDbVersion();
   }
 
-  // 🆕 دالة جلب رقم إصدار الداتا بيز
   void _getDbVersion() {
     setState(() {
-      // التأكد من أنك ضفت getter currentDbVersion في db_helper
       _dbVer = DatabaseHelper().currentDbVersion;
     });
   }
@@ -58,7 +59,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // معرفة الوضع الحالي لتنسيق الألوان
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white70 : Colors.grey[800];
 
@@ -166,11 +166,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ? null
                               : () async {
                                   await _performAction(() async {
-                                    // 🆕 هنا استخدمنا exportBackup الجديدة (ZIP)
                                     await BackupService().exportBackup(context);
                                   });
                                 },
-                          icon: const Icon(Icons.archive), // أيقونة الأرشيف
+                          icon: const Icon(Icons.archive),
                           label: const Text('تصدير نسخة (ZIP)'),
                         ),
                       ),
@@ -212,7 +211,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                           onPressed: () async {
                                             Navigator.pop(ctx);
                                             await _performAction(() async {
-                                              // 🆕 هنا استخدمنا importBackup الجديدة
                                               await BackupService()
                                                   .importBackup(context);
                                             });
@@ -268,7 +266,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ? null
                           : () async {
                               await _performAction(() async {
-                                // استخدام دالتك الموجودة في كودك
                                 await ExcelService().exportFullBackup();
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -306,7 +303,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ? null
                           : () async {
                               await _performAction(() async {
-                                // استخدام دالتك الموجودة في كودك
                                 String res = await ExcelService()
                                     .importFullBackup();
                                 if (mounted) {
@@ -333,9 +329,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
 
+                  const SizedBox(height: 30),
+                  const Divider(),
+                  const SizedBox(height: 20),
+
+                  // --- 🆕 قسم تحديث النظام ---
+                  const Text(
+                    'تحديث النظام',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue,
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isLoading
+                            ? Colors.grey
+                            : Colors.blue[800],
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      onPressed: _isLoading
+                          ? null
+                          : () async {
+                              // التحقق من النظام لتجنب الكراش على لينكس
+                              if (Platform.isLinux) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'التحديث التلقائي غير مدعوم على نسخة اللينكس التجريبية',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+
+                              await _performAction(() async {
+                                // استدعاء دالة التحقق من التحديث
+                                await UpdateService().checkForUpdate(context);
+                              });
+                            },
+                      icon: const Icon(Icons.system_update),
+                      label: const Text('التحقق من وجود تحديثات'),
+                    ),
+                  ),
+
                   const SizedBox(height: 40),
 
-                  // --- الفوتر الجديد (يحتوي على الإصدارات) ---
+                  // --- الفوتر (يحتوي على الإصدارات) ---
                   Center(
                     child: Column(
                       children: [
@@ -360,7 +409,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         const SizedBox(height: 10),
 
-                        // 🆕 المستطيل الجديد لعرض الإصدارات
+                        // مستطيل عرض الإصدارات
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
