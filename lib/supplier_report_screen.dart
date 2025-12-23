@@ -37,34 +37,86 @@ class _SupplierReportScreenState extends State<SupplierReportScreen> {
   }
 
   // تحميل البيانات (المنطق المدمج)
+  // استبدل الدالة القديمة بهذه الجديدة
   void _loadStatement() async {
     if (_selectedSupplierId == null) return;
 
+    // 1. جلب العمليات (فواتير، مرتجعات، دفع) خلال الفترة
     final data = await DatabaseHelper().getSupplierStatement(
       _selectedSupplierId!,
       startDate: _startDate,
       endDate: _endDate,
     );
 
+    // 2. 🔥 جلب الرصيد الافتتاحي الأساسي للمورد (الذي تم تسجيله عند الإضافة)
+    // ملاحظة: للحصول على كشف حساب دقيق 100%، المفروض نحسب كمان العمليات اللي حصلت "قبل" تاريخ البداية
+    // لكن مبدئياً سنعرض الرصيد الافتتاحي المسجل في كارت المورد.
+    double openingBalance = await DatabaseHelper().getSupplierOpeningBalance(
+      _selectedSupplierId!,
+    );
+
     double purchases = 0;
     double paid = 0;
 
-    for (var item in data) {
+    // 3. دمج الرصيد الافتتاحي في القائمة ليظهر للمستخدم
+    // بنعمل نسخة قابلة للتعديل من الداتا
+    List<Map<String, dynamic>> allData = List.from(data);
+
+    if (openingBalance != 0) {
+      allData.insert(0, {
+        'id': 0, // ID وهمي
+        'type': 'opening', // نوع جديد عشان نميزه في الرسم
+        'amount': openingBalance.abs(),
+        'date': _startDate.toString(), // نخليه بتاريخ بداية البحث
+        'description': 'رصيد افتتاحي / سابق',
+      });
+    }
+
+    // 4. حساب الإجماليات
+    for (var item in allData) {
       double amount = (item['amount'] as num).toDouble();
-      if (item['type'] == 'payment') {
+
+      if (item['type'] == 'opening') {
+        // لو الرصيد بالموجب (علينا) بنزود المديونية، لو بالسالب (لنا) بننقصها
+        // (حسب منطقك: موجب = مدين/علينا)
+        if (openingBalance > 0)
+          purchases += amount;
+        else
+          paid += amount; // أو نعتبرها رصيد دائن
+      } else if (item['type'] == 'payment') {
         paid += amount;
       } else if (item['type'] == 'bill') {
         purchases += amount;
       } else if (item['type'] == 'return') {
-        purchases -= amount; // المرتجع يقلل المديونية
+        purchases -= amount;
       }
     }
 
+    // المعادلة: (الرصيد الافتتاحي + الفواتير) - (المدفوعات + المرتجعات)
+    // هنا بسطناها بإننا دمجنا الافتتاحي في المتغيرات فوق
+    double finalBal = 0;
+    // حساب دقيق: الرصيد الافتتاحي + الفواتير - المدفوعات - المرتجعات
+    // لاحظ: في اللوب فوق، المرتجع خصمناه من المشتريات بالفعل
+
+    // الطريقة الأبسط للحساب النهائي المباشر:
+    double totalBills = 0;
+    double totalPayments = 0;
+    double totalReturns = 0;
+
+    for (var item in data) {
+      // نحسب العمليات فقط
+      if (item['type'] == 'bill') totalBills += (item['amount'] as num);
+      if (item['type'] == 'payment') totalPayments += (item['amount'] as num);
+      if (item['type'] == 'return') totalReturns += (item['amount'] as num);
+    }
+
+    finalBal = openingBalance + totalBills - totalReturns - totalPayments;
+
     setState(() {
-      _statementData = data;
-      _periodPurchases = purchases;
-      _periodPaid = paid;
-      _finalBalance = purchases - paid;
+      _statementData = allData; // القائمة الجديدة اللي فيها الافتتاحي
+      _periodPurchases = totalBills; // مشتريات الفترة فقط للعرض
+      _periodPaid = totalPayments; // مدفوعات الفترة فقط للعرض
+      _finalBalance = finalBal; // الرصيد النهائي (شامل الافتتاحي)
       _applyLocalFilter();
     });
   }
@@ -372,14 +424,22 @@ class _SupplierReportScreenState extends State<SupplierReportScreen> {
                   _buildStatCard(
                     "مدفوعات الفترة",
                     _periodPaid,
-                    Colors.green,
+                    Colors
+                        .blue, // غيرت دي أزرق عشان الأخضر ميتكررش، أو سيبها green زي ما تحب
                     isDark,
                   ),
                   const SizedBox(width: 5),
+
+                  // 👇 التعديل هنا: تحديد اللون بناءً على القيمة
                   _buildStatCard(
                     "صافي المستحق",
-                    _finalBalance,
-                    Colors.brown,
+                    _finalBalance, // الرقم زي ما هو
+                    _finalBalance > 0
+                        ? Colors
+                              .red // لو موجب (علينا) => أحمر
+                        : (_finalBalance < 0
+                              ? Colors.green
+                              : Colors.brown), // لو سالب (لنا) => أخضر
                     isDark,
                     isBold: true,
                   ),
@@ -522,7 +582,11 @@ class _SupplierReportScreenState extends State<SupplierReportScreen> {
     IconData icon;
     Color color;
     String label;
-    if (item['type'] == 'bill') {
+    if (item['type'] == 'opening') {
+      icon = Icons.account_balance;
+      color = Colors.blueGrey;
+      label = "رصيد سابق";
+    } else if (item['type'] == 'bill') {
       icon = Icons.shopping_bag;
       color = Colors.orange;
       label = "فاتورة شراء";
@@ -537,7 +601,10 @@ class _SupplierReportScreenState extends State<SupplierReportScreen> {
     }
 
     return Card(
-      elevation: 1,
+      elevation: item['type'] == 'opening' ? 0 : 1, // تمييز الافتتاحي
+      color: item['type'] == 'opening'
+          ? (isDark ? Colors.grey[900] : Colors.grey[200])
+          : null,
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         onTap: item['type'] == 'bill' ? () => _showInvoiceDetails(item) : null,
@@ -562,7 +629,8 @@ class _SupplierReportScreenState extends State<SupplierReportScreen> {
           "${item['date'].toString().split(' ')[0]}  •  $label",
           style: const TextStyle(fontSize: 11),
         ),
-        trailing: item['type'] == 'payment'
+        // الرصيد الافتتاحي لا يمكن حذفه من هنا (يعدل من شاشة الموردين)
+        trailing: (item['type'] == 'payment')
             ? PopupMenuButton<String>(
                 onSelected: (val) {
                   if (val == 'edit') _showPaymentDialog(existingPayment: item);
@@ -586,7 +654,7 @@ class _SupplierReportScreenState extends State<SupplierReportScreen> {
                       size: 14,
                       color: Colors.grey,
                     )
-                  : null),
+                  : null), // لا نظهر أيقونات للافتتاحي
       ),
     );
   }
