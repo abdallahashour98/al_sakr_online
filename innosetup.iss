@@ -1,6 +1,6 @@
 [Setup]
 AppName=AL SAKR
-AppVersion=1.0.0
+AppVersion=1.0.2
 DefaultDirName={autopf}\AL-SAKR
 DefaultGroupName=AL SAKR
 OutputDir=.\build\windows\installer
