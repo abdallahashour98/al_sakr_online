@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'dart:io';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'backup_service.dart';
 
 // متغير التحكم في الثيم
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.system);
@@ -36,6 +37,47 @@ Future<void> main() async {
     // التقاط صور للشاشة عند حدوث الخطأ (مفيد جداً في حل المشاكل)
     options.attachScreenshot = true;
   }, appRunner: () => runApp(const AccountingApp()));
+}
+
+void scheduleAutoBackup() async {
+  final backupService = BackupService();
+
+  // 1. هل عملنا باك اب النهاردة بالفعل؟
+  bool doneToday = await backupService.isBackupDoneToday();
+  if (doneToday) {
+    print("info: Auto backup already done for today.");
+    return; // خلاص مش محتاجين نعمل حاجة
+  }
+
+  DateTime now = DateTime.now();
+
+  // 2. تحديد وقت الهدف (اليوم الساعة 4 عصراً)
+  DateTime targetTime = DateTime(
+    now.year,
+    now.month,
+    now.day,
+    16,
+    0,
+    0,
+  ); // 16:00 = 4 PM
+
+  // 3. التحقق من السيناريوهات
+  if (now.isAfter(targetTime)) {
+    // 🅰️ السيناريو الأول: فتحنا البرنامج بعد الساعة 4 ولسة معملناش باك اب
+    // (يعني فات معادها أو الجهاز كان مقفول)
+    print("⚠️ Missed 4 PM schedule, starting backup now (Catch-up)...");
+    await backupService.performAutoBackup();
+  } else {
+    // 🅱️ السيناريو الثاني: فتحنا البرنامج قبل الساعة 4 (مثلاً الساعة 1 ظهرأ)
+    // لازم نضبط تايمر يشتغل لما الساعة تيجي 4 والبرنامج مفتوح
+    Duration waitDuration = targetTime.difference(now);
+    print("⏰ Scheduling backup in ${waitDuration.inMinutes} minutes (at 4 PM)");
+
+    Timer(waitDuration, () async {
+      print("🔔 It's 4 PM! Starting scheduled backup...");
+      await backupService.performAutoBackup();
+    });
+  }
 }
 
 class AccountingApp extends StatelessWidget {

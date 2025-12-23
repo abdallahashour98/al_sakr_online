@@ -1,3 +1,4 @@
+import 'package:al_sakr/main.dart';
 import 'package:flutter/material.dart';
 import 'db_helper.dart';
 import 'dart:io'; // للتعامل مع ملفات الصور
@@ -38,6 +39,7 @@ class _SalesScreenState extends State<SalesScreen> {
   @override
   void initState() {
     super.initState();
+    scheduleAutoBackup();
     _loadData();
   }
 

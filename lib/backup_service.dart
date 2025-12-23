@@ -5,8 +5,9 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/material.dart';
-// import 'package:sqflite/sqflite.dart'; // ❌ لم نعد نحتاجها هنا
+//import 'package:sqflite/sqflite.dart'; // ❌ لم نعد نحتاجها هنا
 import 'db_helper.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // 🆕 إضافة
 
 class BackupService {
   final String _dbName = 'SmartAccountingDB.db';
@@ -208,5 +209,68 @@ class BackupService {
       }
       return false;
     }
+  }
+
+  Future<void> performAutoBackup() async {
+    try {
+      print("⏳ Starting Auto Backup...");
+
+      // 1. تحديد مسار قاعدة البيانات
+      String dbPath = await DatabaseHelper().getDbPath();
+      final dbFile = File(dbPath);
+      final appDir = await getApplicationSupportDirectory();
+      final imagesDir = Directory('${appDir.path}/product_images');
+
+      // 2. إغلاق الداتا بيز مؤقتاً
+      final dbHelper = DatabaseHelper();
+      await dbHelper.close();
+
+      // 3. تحديد مكان الحفظ التلقائي (في المستندات/Backups/Auto)
+      Directory docDir = await getApplicationDocumentsDirectory();
+      Directory backupDir = Directory('${docDir.path}/AlSakr_Backups/Auto');
+
+      if (!await backupDir.exists()) {
+        await backupDir.create(recursive: true);
+      }
+
+      // 4. تسمية الملف بالتاريخ والوقت
+      final dateStr = DateTime.now()
+          .toString()
+          .replaceAll(':', '-')
+          .split('.')[0];
+      final zipPath = '${backupDir.path}/AutoBackup_$dateStr.zip';
+
+      // 5. الضغط
+      var encoder = ZipFileEncoder();
+      encoder.create(zipPath);
+
+      if (await dbFile.exists()) {
+        await encoder.addFile(dbFile, 'database.db');
+      }
+
+      if (await imagesDir.exists()) {
+        await encoder.addDirectory(imagesDir, includeDirName: true);
+      }
+
+      encoder.close();
+
+      // 6. 🆕 تسجيل تاريخ الباك اب في الذاكرة عشان ميعملش تاني في نفس اليوم
+      final prefs = await SharedPreferences.getInstance();
+      // نسجل التاريخ فقط (بدون الوقت) 2023-12-23
+      String todayDate = DateTime.now().toString().split(' ')[0];
+      await prefs.setString('last_auto_backup_date', todayDate);
+
+      print("✅ Auto Backup Success at: $zipPath");
+    } catch (e) {
+      print("❌ Auto Backup Failed: $e");
+    }
+  }
+
+  // دالة للتحقق: هل تم عمل باك اب اليوم؟
+  Future<bool> isBackupDoneToday() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? lastDate = prefs.getString('last_auto_backup_date');
+    String todayDate = DateTime.now().toString().split(' ')[0];
+    return lastDate == todayDate;
   }
 }
