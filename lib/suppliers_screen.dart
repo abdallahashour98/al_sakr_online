@@ -279,57 +279,68 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                   onPressed: () async {
                     if (_nameController.text.isEmpty) return;
 
-                    // 3️⃣ تجهيز قيمة الرصيد الافتتاحي الجديدة
-                    double opAmount =
-                        double.tryParse(_openingBalanceController.text) ?? 0.0;
-                    if (_balanceType == 'credit') opAmount = -opAmount;
+                    try {
+                      // 3️⃣ تجهيز قيمة الرصيد الافتتاحي الجديدة
+                      double opAmount =
+                          double.tryParse(_openingBalanceController.text) ??
+                          0.0;
+                      if (_balanceType == 'credit') opAmount = -opAmount;
 
-                    if (supplier == null) {
-                      // --- حالة الإضافة ---
-                      // 1. نضيف المورد برصيد صفر مبدئياً
-                      int newId = await DatabaseHelper().insertSupplier({
-                        'code': _codeController.text,
-                        'name': _nameController.text,
-                        'contactPerson': _contactPersonController.text,
-                        'phone': _phoneController.text,
-                        'address': _addressController.text,
-                        'notes': _notesController.text,
-                        'balance': 0.0,
-                      });
+                      if (supplier == null) {
+                        // --- حالة الإضافة ---
+                        int newId = await DatabaseHelper().insertSupplier({
+                          'code': _codeController.text,
+                          'name': _nameController.text,
+                          'contactPerson': _contactPersonController.text,
+                          'phone': _phoneController.text,
+                          'address': _addressController.text,
+                          'notes': _notesController.text,
+                          'balance': 0.0,
+                        });
 
-                      // 2. نسجل الرصيد الافتتاحي (وده هيسمع في الرصيد الكلي)
-                      await DatabaseHelper().updateSupplierOpeningBalance(
-                        newId,
-                        opAmount,
-                      );
-                    } else {
-                      // --- حالة التعديل ---
-                      // 1. نحدث البيانات النصية
-                      await DatabaseHelper().updateSupplier({
-                        'id': supplier['id'],
-                        'code': _codeController.text,
-                        'name': _nameController.text,
-                        'contactPerson': _contactPersonController.text,
-                        'phone': _phoneController.text,
-                        'address': _addressController.text,
-                        'notes': _notesController.text,
-                        // لاحظ: مبنبعتش balance هنا عشان ميصفرش الرصيد الحالي
-                      });
+                        await DatabaseHelper().updateSupplierOpeningBalance(
+                          newId,
+                          opAmount,
+                        );
+                      } else {
+                        // --- حالة التعديل ---
+                        await DatabaseHelper().updateSupplier({
+                          'id': supplier['id'],
+                          'code': _codeController.text,
+                          'name': _nameController.text,
+                          'contactPerson': _contactPersonController.text,
+                          'phone': _phoneController.text,
+                          'address': _addressController.text,
+                          'notes': _notesController.text,
+                        });
 
-                      // 2. نحدث الرصيد الافتتاحي (السيستم هيحسب الفرق ويعدل الرصيد الحالي)
-                      await DatabaseHelper().updateSupplierOpeningBalance(
-                        supplier['id'],
-                        opAmount,
-                      );
-                    }
+                        await DatabaseHelper().updateSupplierOpeningBalance(
+                          supplier['id'],
+                          opAmount,
+                        );
+                      }
 
-                    _clearControllers();
-                    if (mounted) {
-                      Navigator.pop(context);
-                      _refreshSuppliers();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('تم الحفظ بنجاح')),
-                      );
+                      _clearControllers();
+                      if (mounted) {
+                        Navigator.pop(context);
+                        _refreshSuppliers();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('تم الحفظ بنجاح'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      // 👇 ده اللي هيعرفك السبب لو مبيحفظش
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('فشل الحفظ: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
                     }
                   },
                   child: const Text(
