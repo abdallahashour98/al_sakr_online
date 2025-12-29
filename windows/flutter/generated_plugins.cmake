@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   firebase_core
   permission_handler_windows
+  printing
   sentry_flutter
   share_plus
   sqlite3_flutter_libs

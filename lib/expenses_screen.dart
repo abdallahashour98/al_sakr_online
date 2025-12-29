@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 👈 مهم عشان نتحكم في إدخال الأرقام
 import 'db_helper.dart';
 
 class ExpensesScreen extends StatefulWidget {
@@ -13,8 +14,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   bool _isLoading = true;
   double _totalExpenses = 0.0;
 
-  // قائمة تصنيفات المصاريف الثابتة (لتسهيل الاختيار)
-  final List<String> _categories = [
+  // القائمة قابلة للتعديل
+  List<String> _categories = [
     'رواتب وأجور',
     'إيجار',
     'كهرباء ومياه',
@@ -35,12 +36,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   void _loadExpenses() async {
     final data = await DatabaseHelper().getExpenses();
-
     double total = 0;
     for (var item in data) {
       total += (item['amount'] as num).toDouble();
     }
-
     setState(() {
       _expenses = data;
       _totalExpenses = total;
@@ -48,7 +47,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     });
   }
 
-  // دالة مساعدة لاختيار أيقونة مناسبة لكل تصنيف
   IconData _getCategoryIcon(String category) {
     switch (category) {
       case 'رواتب وأجور':
@@ -74,65 +72,195 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     }
   }
 
-  void _showAddExpenseDialog() {
-    final titleController = TextEditingController();
-    final amountController = TextEditingController();
-    final notesController = TextEditingController();
-    String selectedCategory = _categories[0];
-    DateTime selectedDate = DateTime.now();
+  void _showManageCategoriesDialog(StateSetter updateParentState) {
+    final newCategoryController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('إدارة التصنيفات'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: newCategoryController,
+                          decoration: const InputDecoration(
+                            hintText: 'تصنيف جديد...',
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle, color: Colors.green),
+                        onPressed: () {
+                          if (newCategoryController.text.isNotEmpty) {
+                            setState(() {
+                              _categories.add(newCategoryController.text);
+                            });
+                            updateParentState(() {});
+                            setStateDialog(() {});
+                            newCategoryController.clear();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+                  Expanded(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _categories.length,
+                      itemBuilder: (c, i) => ListTile(
+                        dense: true,
+                        title: Text(_categories[i]),
+                        trailing: IconButton(
+                          icon: const Icon(
+                            Icons.delete,
+                            color: Colors.red,
+                            size: 20,
+                          ),
+                          onPressed: () {
+                            if (_categories.length > 1) {
+                              setState(() {
+                                _categories.removeAt(i);
+                              });
+                              updateParentState(() {});
+                              setStateDialog(() {});
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إغلاق'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // 🆕 دالة موحدة للإضافة والتعديل
+  // لو بعتنا expenseToEdit يبقى تعديل، لو null يبقى إضافة
+  void _showExpenseDialog({Map<String, dynamic>? expenseToEdit}) {
+    final isEditing = expenseToEdit != null;
+
+    final titleController = TextEditingController(
+      text: isEditing ? expenseToEdit['title'] : '',
+    );
+    final amountController = TextEditingController(
+      text: isEditing ? expenseToEdit['amount'].toString() : '',
+    );
+    final notesController = TextEditingController(
+      text: isEditing ? expenseToEdit['notes'] : '',
+    );
+
+    String selectedCategory = isEditing
+        ? expenseToEdit['category']
+        : (_categories.isNotEmpty ? _categories[0] : 'أخرى');
+    DateTime selectedDate = isEditing
+        ? DateTime.parse(expenseToEdit['date'])
+        : DateTime.now();
+
+    // التأكد من وجود التصنيف
+    if (!_categories.contains(selectedCategory)) {
+      selectedCategory = _categories[0];
+    }
 
     showDialog(
       context: context,
       builder: (_) {
-        // نستخدم StatefulBuilder داخل الديالوج لتحديث الحالة (مثل التاريخ والنوع)
         return StatefulBuilder(
           builder: (context, setStateSB) {
             final isDark = Theme.of(context).brightness == Brightness.dark;
 
             return AlertDialog(
-              title: const Text('تسجيل مصروف جديد'),
+              title: Text(isEditing ? 'تعديل مصروف' : 'تسجيل مصروف جديد'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // المبلغ
+                    // المبلغ (إجباري + أرقام فقط)
                     TextField(
                       controller: amountController,
-                      keyboardType: TextInputType.number,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ), // كيبورد أرقام
+                      inputFormatters: [
+                        // 🆕 السماح بالأرقام ونقطة واحدة فقط (للأرقام العشرية)
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'^\d+\.?\d*'),
+                        ),
+                      ],
                       decoration: const InputDecoration(
-                        labelText: 'المبلغ',
+                        labelText: 'المبلغ *',
                         prefixIcon: Icon(Icons.money),
                         border: OutlineInputBorder(),
+                        hintText: "0.00",
                       ),
                     ),
                     const SizedBox(height: 10),
 
-                    // عنوان المصروف
+                    // العنوان
                     TextField(
                       controller: titleController,
                       decoration: const InputDecoration(
-                        labelText: 'بند الصرف (وصف مختصر)',
-                        hintText: 'مثال: فاتورة كهرباء شهر 5',
+                        labelText: 'بند الصرف (اختياري)',
+                        hintText: 'اتركه فارغاً لاستخدام اسم التصنيف',
                         prefixIcon: Icon(Icons.title),
                         border: OutlineInputBorder(),
                       ),
                     ),
                     const SizedBox(height: 10),
 
-                    // التصنيف (Dropdown)
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedCategory,
-                      decoration: const InputDecoration(
-                        labelText: 'التصنيف',
-                        prefixIcon: Icon(Icons.category),
-                        border: OutlineInputBorder(),
-                      ),
-                      items: _categories.map((cat) {
-                        return DropdownMenuItem(value: cat, child: Text(cat));
-                      }).toList(),
-                      onChanged: (val) {
-                        setStateSB(() => selectedCategory = val!);
-                      },
+                    // التصنيف
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: selectedCategory,
+                            decoration: const InputDecoration(
+                              labelText: 'التصنيف',
+                              prefixIcon: Icon(Icons.category),
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 15,
+                              ),
+                            ),
+                            items: _categories.map((cat) {
+                              return DropdownMenuItem(
+                                value: cat,
+                                child: Text(
+                                  cat,
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              setStateSB(() => selectedCategory = val!);
+                            },
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.blue),
+                          onPressed: () =>
+                              _showManageCategoriesDialog(setStateSB),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 10),
 
@@ -144,24 +272,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           initialDate: selectedDate,
                           firstDate: DateTime(2020),
                           lastDate: DateTime(2030),
-                          builder: (context, child) {
-                            return Theme(
-                              data: Theme.of(context).copyWith(
-                                colorScheme: isDark
-                                    ? const ColorScheme.dark(
-                                        primary: Colors.red,
-                                      )
-                                    : const ColorScheme.light(
-                                        primary: Colors.red,
-                                      ),
-                              ),
-                              child: child!,
-                            );
-                          },
                         );
-                        if (picked != null) {
+                        if (picked != null)
                           setStateSB(() => selectedDate = picked);
-                        }
                       },
                       child: Container(
                         padding: const EdgeInsets.all(12),
@@ -201,27 +314,47 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red[700],
+                    backgroundColor: isEditing ? Colors.blue : Colors.red[700],
                     foregroundColor: Colors.white,
                   ),
                   onPressed: () async {
-                    if (amountController.text.isNotEmpty &&
-                        titleController.text.isNotEmpty) {
-                      await DatabaseHelper().insertExpense({
-                        'title': titleController.text,
-                        'amount': double.tryParse(amountController.text) ?? 0.0,
-                        'category': selectedCategory,
-                        'date': selectedDate.toString(),
-                        'notes': notesController.text,
-                      });
+                    if (amountController.text.isNotEmpty) {
+                      String finalTitle = titleController.text.isEmpty
+                          ? selectedCategory
+                          : titleController.text;
+
+                      if (isEditing) {
+                        // 🆕 منطق التعديل
+                        await DatabaseHelper().updateExpense({
+                          'id': expenseToEdit['id'], // مهم جداً الـ ID
+                          'title': finalTitle,
+                          'amount':
+                              double.tryParse(amountController.text) ?? 0.0,
+                          'category': selectedCategory,
+                          'date': selectedDate.toString(),
+                          'notes': notesController.text,
+                        });
+                      } else {
+                        // منطق الإضافة
+                        await DatabaseHelper().insertExpense({
+                          'title': finalTitle,
+                          'amount':
+                              double.tryParse(amountController.text) ?? 0.0,
+                          'category': selectedCategory,
+                          'date': selectedDate.toString(),
+                          'notes': notesController.text,
+                        });
+                      }
 
                       Navigator.pop(context);
-                      _loadExpenses(); // تحديث القائمة
+                      _loadExpenses();
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
+                        SnackBar(
                           content: Text(
-                            'تم تسجيل المصروف بنجاح',
-                            style: TextStyle(color: Colors.white),
+                            isEditing
+                                ? 'تم تعديل المصروف بنجاح'
+                                : 'تم تسجيل المصروف بنجاح',
+                            style: const TextStyle(color: Colors.white),
                           ),
                           backgroundColor: Colors.green,
                         ),
@@ -229,13 +362,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('يرجى إدخال المبلغ والوصف'),
+                          content: Text('يرجى إدخال المبلغ'),
                           backgroundColor: Colors.red,
                         ),
                       );
                     }
                   },
-                  child: const Text('حفظ'),
+                  child: Text(isEditing ? 'حفظ التعديلات' : 'حفظ'),
                 ),
               ],
             );
@@ -274,19 +407,14 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('إدارة المصروفات'),
-        // تم الاعتماد على الثيم الرئيسي للألوان
-      ),
+      appBar: AppBar(title: const Text('إدارة المصروفات')),
       body: Column(
         children: [
-          // --- كارت الملخص العلوي ---
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             margin: const EdgeInsets.all(15),
             decoration: BoxDecoration(
-              // تدرج لوني أحمر للمصاريف
               gradient: LinearGradient(
                 colors: isDark
                     ? [Colors.red[900]!, Colors.red[700]!]
@@ -322,7 +450,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             ),
           ),
 
-          // --- قائمة المصروفات ---
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -386,6 +513,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                 ),
                             ],
                           ),
+                          // 🆕 أزرار التعديل والحذف
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -397,6 +525,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                   fontSize: 16,
                                 ),
                               ),
+                              const SizedBox(width: 5),
+                              // زر التعديل
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.edit,
+                                  color: Colors.blue,
+                                  size: 20,
+                                ),
+                                onPressed: () =>
+                                    _showExpenseDialog(expenseToEdit: item),
+                              ),
+                              // زر الحذف
                               IconButton(
                                 icon: const Icon(
                                   Icons.delete,
@@ -415,7 +555,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddExpenseDialog,
+        // عند الإضافة نرسل null
+        onPressed: () => _showExpenseDialog(),
         label: const Text('تسجيل مصروف', style: TextStyle(color: Colors.white)),
         icon: const Icon(Icons.add, color: Colors.white),
         backgroundColor: Colors.red[700],

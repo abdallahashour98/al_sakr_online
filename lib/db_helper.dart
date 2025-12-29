@@ -1,8 +1,7 @@
 import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:io';
-import 'package:path_provider/path_provider.dart'; // السطر ده لازم يكون موجود
-import 'package:sqflite/sqflite.dart';
+import 'package:path_provider/path_provider.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -11,7 +10,7 @@ class DatabaseHelper {
 
   static Database? _database;
   final String _dbName = 'SmartAccountingDB.db';
-  final int _dbVersion = 2;
+  final int _dbVersion = 3;
 
   // Getter للرقم عشان شاشة الإعدادات
   int get currentDbVersion => _dbVersion;
@@ -28,10 +27,8 @@ class DatabaseHelper {
       databaseFactory = databaseFactoryFfi;
     }
 
-    // 2. الحصول على المسار الموحد
     final String path = await getDbPath();
 
-    // 3. فتح قاعدة البيانات
     return await openDatabase(
       path,
       version: _dbVersion,
@@ -41,7 +38,7 @@ class DatabaseHelper {
     );
   }
 
-  // --- دالة الإنشاء (للمستخدم الجديد "على نظافة") ---
+  // --- دالة الإنشاء (للمستخدم الجديد) ---
   Future _onCreate(Database db, int version) async {
     // 1. العملاء
     await db.execute(
@@ -51,7 +48,7 @@ class DatabaseHelper {
     await db.execute(
       'CREATE TABLE suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, name TEXT, contactPerson TEXT, phone TEXT, address TEXT, notes TEXT, balance REAL DEFAULT 0.0)',
     );
-    // 3. المنتجات (شاملة الصورة)
+    // 3. المنتجات
     await db.execute(
       'CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, code TEXT, barcode TEXT, category TEXT, unit TEXT, buyPrice REAL, sellPrice REAL, minSellPrice REAL, stock INTEGER, reorderLevel INTEGER, supplierId INTEGER, notes TEXT, expiryDate TEXT, imagePath TEXT)',
     );
@@ -60,9 +57,8 @@ class DatabaseHelper {
       'CREATE TABLE units (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)',
     );
     await db.insert('units', {'name': 'قطعة'});
-    await db.insert('units', {'name': 'كرتونة'});
 
-    // 5. المبيعات (شاملة كل الأعمدة الجديدة)
+    // 5. المبيعات
     await db.execute(
       "CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, storedClientName TEXT, totalAmount REAL, taxAmount REAL DEFAULT 0.0, discount REAL DEFAULT 0.0, netAmount REAL DEFAULT 0.0, date TEXT, notes TEXT, referenceNumber TEXT, totalReturned REAL DEFAULT 0.0, paymentType TEXT DEFAULT 'cash')",
     );
@@ -77,10 +73,15 @@ class DatabaseHelper {
     await db.execute(
       'CREATE TABLE return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
     );
-
-    // 7. المشتريات
     await db.execute(
-      'CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, totalAmount REAL, taxAmount REAL DEFAULT 0.0, date TEXT, notes TEXT, referenceNumber TEXT)',
+      'CREATE TABLE delivery_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, clientName TEXT, supplyOrderNumber TEXT, manualNo TEXT, deliveryDate TEXT, address TEXT, notes TEXT)',
+    );
+    await db.execute(
+      'CREATE TABLE delivery_items (id INTEGER PRIMARY KEY AUTOINCREMENT, orderId INTEGER, productName TEXT, quantity INTEGER, description TEXT)',
+    );
+    // 7. المشتريات (مع عمود ضريبة الخصم whtAmount)
+    await db.execute(
+      'CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, totalAmount REAL, taxAmount REAL DEFAULT 0.0, whtAmount REAL DEFAULT 0.0, date TEXT, notes TEXT, referenceNumber TEXT)',
     );
     await db.execute(
       'CREATE TABLE purchase_items (id INTEGER PRIMARY KEY AUTOINCREMENT, invoiceId INTEGER, productId INTEGER, quantity INTEGER, costPrice REAL)',
@@ -103,7 +104,7 @@ class DatabaseHelper {
       'CREATE TABLE expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, amount REAL, date TEXT, category TEXT, notes TEXT)',
     );
 
-    // 9. الجداول الجديدة (مهمة جداً)
+    // 9. الجداول الإضافية
     await db.execute(
       'CREATE TABLE supplier_opening_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, amount REAL, date TEXT, notes TEXT)',
     );
@@ -113,100 +114,108 @@ class DatabaseHelper {
     await db.execute(
       'CREATE TABLE purchase_return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
     );
+    await db.execute(
+      'CREATE TABLE delivery_items (id INTEGER PRIMARY KEY AUTOINCREMENT, orderId INTEGER, productName TEXT, quantity INTEGER, description TEXT, relatedSupplyOrder TEXT)',
+    );
   }
 
-  // --- 🔥 دالة الترقية (للمستخدم القديم - دي اللي هتحميك) 🔥 ---
+  // --- 🔥 دالة الترقية (للمستخدم القديم) 🔥 ---
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // الترقية التراكمية: الكود ده هيشتغل لو العميل عنده أي نسخة قديمة
-
-    // 1. التأكد من وجود الجداول الأساسية المضافة حديثاً
-    if (oldVersion < 2) {
-      // جدول المصاريف
+    if (oldVersion < 3) {
+      // الجداول المفقودة عند التحديث
       await db.execute(
         'CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, amount REAL, date TEXT, category TEXT, notes TEXT)',
       );
-
-      // تحديثات الأعمدة (نستخدم try-catch عشان لو العمود موجود التطبيق مايضربش)
-      try {
-        await db.execute(
-          'ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0.0',
-        );
-      } catch (_) {}
-      try {
-        await db.execute(
-          'ALTER TABLE sales ADD COLUMN taxAmount REAL DEFAULT 0.0',
-        );
-      } catch (_) {}
-      try {
-        await db.execute(
-          'ALTER TABLE sales ADD COLUMN netAmount REAL DEFAULT 0.0',
-        );
-      } catch (_) {}
-
-      // معادلة البيانات القديمة
-      await db.execute(
-        'UPDATE sales SET netAmount = totalAmount WHERE netAmount = 0 OR netAmount IS NULL',
-      );
-
-      try {
-        await db.execute('ALTER TABLE products ADD COLUMN expiryDate TEXT');
-      } catch (_) {}
-      try {
-        await db.execute('ALTER TABLE sale_items ADD COLUMN productName TEXT');
-      } catch (_) {}
-      try {
-        await db.execute(
-          'ALTER TABLE sales ADD COLUMN totalReturned REAL DEFAULT 0.0',
-        );
-      } catch (_) {}
-      try {
-        await db.execute(
-          "ALTER TABLE sales ADD COLUMN paymentType TEXT DEFAULT 'cash'",
-        );
-      } catch (_) {}
-
-      // جدول مدفوعات العملاء
       await db.execute(
         'CREATE TABLE IF NOT EXISTS client_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT, type TEXT)',
       );
-
-      try {
-        await db.execute(
-          'ALTER TABLE returns ADD COLUMN paidAmount REAL DEFAULT 0.0',
-        );
-      } catch (_) {}
-      try {
-        await db.execute(
-          'ALTER TABLE returns ADD COLUMN discount REAL DEFAULT 0.0',
-        );
-      } catch (_) {}
-      try {
-        await db.execute(
-          'ALTER TABLE purchase_invoices ADD COLUMN taxAmount REAL DEFAULT 0.0',
-        );
-      } catch (_) {}
-
-      // 🔥 الجداول الجديدة (مع IF NOT EXISTS للحماية القصوى) 🔥
-
-      // أرصدة الموردين الافتتاحية
       await db.execute(
         'CREATE TABLE IF NOT EXISTS supplier_opening_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, amount REAL, date TEXT, notes TEXT)',
       );
-
-      // مرتجعات الموردين
       await db.execute(
         'CREATE TABLE IF NOT EXISTS purchase_returns (id INTEGER PRIMARY KEY AUTOINCREMENT, invoiceId INTEGER, supplierId INTEGER, totalAmount REAL, date TEXT, notes TEXT)',
       );
-
       await db.execute(
         'CREATE TABLE IF NOT EXISTS purchase_return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
       );
+      // داخل دالة _onUpgrade (في الجزء الخاص بـ oldVersion < 3 أو ضيفها في الآخر)
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS delivery_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, clientName TEXT, supplyOrderNumber TEXT, deliveryDate TEXT, address TEXT, notes TEXT)',
+      );
+      await db.execute(
+        'CREATE TABLE IF NOT EXISTS delivery_items (id INTEGER PRIMARY KEY AUTOINCREMENT, orderId INTEGER, productName TEXT, quantity INTEGER, description TEXT)',
+      );
 
-      // 🖼️ إضافة عمود الصورة (آخر تحديث)
+      // إضافة الأعمدة الناقصة بأمان (try-catch)
+      var columnsToAdd = [
+        'ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0.0',
+        'ALTER TABLE sales ADD COLUMN taxAmount REAL DEFAULT 0.0',
+        'ALTER TABLE sales ADD COLUMN netAmount REAL DEFAULT 0.0',
+        'ALTER TABLE sales ADD COLUMN totalReturned REAL DEFAULT 0.0',
+        "ALTER TABLE sales ADD COLUMN paymentType TEXT DEFAULT 'cash'",
+        'ALTER TABLE products ADD COLUMN expiryDate TEXT',
+        'ALTER TABLE products ADD COLUMN imagePath TEXT',
+        'ALTER TABLE sale_items ADD COLUMN productName TEXT',
+        'ALTER TABLE returns ADD COLUMN paidAmount REAL DEFAULT 0.0',
+        'ALTER TABLE returns ADD COLUMN discount REAL DEFAULT 0.0',
+        'ALTER TABLE purchase_invoices ADD COLUMN taxAmount REAL DEFAULT 0.0',
+        // 🔥 العمود الجديد لضريبة الخصم
+        'ALTER TABLE purchase_invoices ADD COLUMN whtAmount REAL DEFAULT 0.0',
+        'ALTER TABLE sales ADD COLUMN whtAmount REAL DEFAULT 0.0',
+        'ALTER TABLE delivery_orders ADD COLUMN manualNo TEXT', //
+      ];
+
+      for (var query in columnsToAdd) {
+        try {
+          await db.execute(query);
+        } catch (_) {}
+      }
+
+      // تحديث البيانات القديمة
       try {
-        await db.execute('ALTER TABLE products ADD COLUMN imagePath TEXT');
+        await db.execute(
+          'UPDATE sales SET netAmount = totalAmount WHERE netAmount = 0 OR netAmount IS NULL',
+        );
+      } catch (_) {}
+      try {
+        await db.execute(
+          'ALTER TABLE delivery_orders ADD COLUMN manualNo TEXT',
+        );
+        print("Column manualNo added successfully");
       } catch (e) {
-        // تجاهل الخطأ لو العمود موجود
+        print("Error adding column: $e");
+      }
+      try {
+        // إضافة عمود أمر التوريد الفرعي للأصناف
+        await db.execute(
+          'ALTER TABLE delivery_items ADD COLUMN relatedSupplyOrder TEXT',
+        );
+        print("Column relatedSupplyOrder added successfully");
+      } catch (e) {
+        print("Error adding relatedSupplyOrder column: $e");
+      }
+      try {
+        // إضافة عمود القفل (0 = مفتوح، 1 = مقفول)
+        await db.execute(
+          'ALTER TABLE delivery_orders ADD COLUMN isLocked INTEGER DEFAULT 0',
+        );
+        print("Column isLocked added successfully");
+      } catch (e) {
+        print("Error adding isLocked column: $e");
+      }
+      try {
+        await db.execute(
+          'ALTER TABLE delivery_orders ADD COLUMN signedImagePath TEXT',
+        );
+        print("Column signedImagePath added");
+      } catch (_) {}
+      try {
+        await db.execute(
+          "ALTER TABLE products ADD COLUMN damagedStock INTEGER DEFAULT 0",
+        );
+        print("Column damagedStock added successfully");
+      } catch (e) {
+        print("Error adding damagedStock: $e");
       }
     }
   }
@@ -308,7 +317,6 @@ class DatabaseHelper {
     return 0.0;
   }
 
-  // --- سندات قبض (من العميل) ---
   Future<int> addReceipt(
     int clientId,
     double amount,
@@ -339,7 +347,6 @@ class DatabaseHelper {
     return await db.delete('receipts', where: 'id = ?', whereArgs: [id]);
   }
 
-  // ✅✅ دالة جديدة: إضافة مدفوعات للعميل (مثل المرتجع النقدي) ✅✅
   Future<int> addClientPayment(
     int clientId,
     double amount,
@@ -356,20 +363,16 @@ class DatabaseHelper {
     });
   }
 
-  // استبدل الدالة القديمة بهذه الدالة المحدثة
   Future<List<Map<String, dynamic>>> getClientStatement(
     int clientId, {
     DateTime? startDate,
     DateTime? endDate,
   }) async {
     Database db = await database;
-
-    // تجهيز شرط التاريخ
     String dateFilter = "";
     List<dynamic> args = [clientId];
 
     if (startDate != null && endDate != null) {
-      // نضيف يوم للنهاية لضمان شمول اليوم الأخير بالكامل
       String start = startDate.toString();
       String end = endDate.add(const Duration(days: 1)).toString();
       dateFilter = " AND date >= ? AND date < ?";
@@ -377,7 +380,6 @@ class DatabaseHelper {
       args.add(end);
     }
 
-    // جلب البيانات مع الفلتر
     List<Map<String, dynamic>> sales = await db.rawQuery(
       'SELECT * FROM sales WHERE clientId = ?$dateFilter',
       args,
@@ -395,9 +397,6 @@ class DatabaseHelper {
       args,
     );
 
-    // الأرصدة الافتتاحية عادة لا ترتبط بتاريخ محدد في كشف الفترة،
-    // ولكن سنجلبها إذا لم يكن هناك فلتر تاريخ أو إذا كان تاريخ البداية يشملها
-    // للتبسيط سنجلبها فقط إذا لم يتم تحديد تاريخ أو سنعتمد عليها كرصيد سابق
     List<Map<String, dynamic>> openings = [];
     if (startDate == null) {
       openings = await db.query(
@@ -459,11 +458,20 @@ class DatabaseHelper {
       });
     }
 
-    // ترتيب العمليات حسب التاريخ
     statement.sort(
       (a, b) => DateTime.parse(a['date']).compareTo(DateTime.parse(b['date'])),
     );
     return statement;
+  }
+
+  Future<int> updateExpense(Map<String, dynamic> row) async {
+    Database db = await database;
+    return await db.update(
+      'expenses',
+      row,
+      where: 'id = ?',
+      whereArgs: [row['id']],
+    );
   }
 
   Future<double> getClientCurrentBalance(int clientId) async {
@@ -473,13 +481,8 @@ class DatabaseHelper {
       if (item['type'] == 'opening' ||
           item['type'] == 'sale' ||
           item['type'] == 'refund_payment') {
-        // refund_payment: يعني إحنا دفعنا للعميل فلوس (رصيده زاد عندنا/ أو قللنا اللي عليه)
-        // محاسبياً: الفاتورة (مدين +)، المرتجع (دائن -).
-        // القبض من العميل (دائن -).
-        // الصرف للعميل (مدين +) -> لأنه أخد فلوس.
         balance += item['amount'];
       } else {
-        // مرتجع أو استلام نقدية
         balance -= item['amount'];
       }
     }
@@ -487,7 +490,6 @@ class DatabaseHelper {
   }
 
   // ==================== (3) الموردين والمشتريات ====================
-  // ... (نفس الدوال السابقة بدون تغيير) ...
   Future<int> insertSupplier(Map<String, dynamic> row) async =>
       await (await database).insert('suppliers', row);
   Future<List<Map<String, dynamic>>> getSuppliers() async =>
@@ -554,7 +556,6 @@ class DatabaseHelper {
   );
 
   // --- عمليات المبيعات ---
-  // --- عمليات المبيعات (معدلة لتدعم الدفع الكاش) ---
   Future<void> createSale(
     int clientId,
     String clientName,
@@ -563,13 +564,13 @@ class DatabaseHelper {
     List<Map<String, dynamic>> items, {
     String refNumber = '',
     double discount = 0.0,
-    bool isCash = false, // 🆕 معامل جديد: هل الفاتورة كاش؟
+    bool isCash = false,
+    double whtAmount = 0.0,
   }) async {
     Database db = await database;
     await db.transaction((txn) async {
-      double netAmount = (totalAmount - discount) + taxAmount;
+      double netAmount = ((totalAmount - discount) + taxAmount) - whtAmount;
 
-      // 1. تسجيل الفاتورة (زيادة المديونية)
       int saleId = await txn.insert('sales', {
         'clientId': clientId,
         'storedClientName': clientName,
@@ -577,12 +578,12 @@ class DatabaseHelper {
         'totalAmount': totalAmount,
         'discount': discount,
         'taxAmount': taxAmount,
+        'whtAmount': whtAmount, // حفظ القيمة
         'netAmount': netAmount,
         'referenceNumber': refNumber,
         'paymentType': isCash ? 'cash' : 'credit',
       });
 
-      // 2. إضافة الأصناف وتحديث المخزون
       for (var item in items) {
         await txn.insert('sale_items', {
           'saleId': saleId,
@@ -605,23 +606,13 @@ class DatabaseHelper {
             whereArgs: [item['productId']],
           );
         }
-        if (isCash) {
-          await txn.insert('receipts', {
-            'clientId': clientId,
-            'amount': netAmount,
-            'date': DateTime.now().toString(),
-            'notes': 'دفع فوري - فاتورة مبيعات #$saleId',
-          });
-        }
       }
-
-      // 3. 🆕 إذا كانت الفاتورة كاش، نسجل سند قبض فوراً (تصفير المديونية لهذه الفاتورة)
       if (isCash) {
         await txn.insert('receipts', {
           'clientId': clientId,
-          'amount': netAmount, // المبلغ كامل
+          'amount': netAmount,
           'date': DateTime.now().toString(),
-          'notes': 'دفع فوري - فاتورة مبيعات #$saleId', // ملاحظة آلية
+          'notes': 'دفع فوري - فاتورة مبيعات #$saleId',
         });
       }
     });
@@ -643,7 +634,7 @@ class DatabaseHelper {
     );
   }
 
-  // --- المرتجعات (تم تحديثها لقبول الخصم إذا رغبت مستقبلاً) ---
+  // --- المرتجعات ---
   Future<void> createReturn(
     int saleId,
     int clientId,
@@ -704,18 +695,15 @@ class DatabaseHelper {
     );
   }
 
-  // --- دالة حذف المرتجع (الآمنة) ---
   Future<void> deleteReturn(int returnId) async {
     Database db = await database;
     await db.transaction((txn) async {
-      // 1. جلب أصناف المرتجع قبل الحذف (عشان نخصمها من المخزن)
       List<Map<String, dynamic>> items = await txn.query(
         'return_items',
         where: 'returnId = ?',
         whereArgs: [returnId],
       );
 
-      // 2. عكس عملية المخزون (نقص الكميات تاني)
       for (var item in items) {
         var prod = await txn.query(
           'products',
@@ -724,7 +712,6 @@ class DatabaseHelper {
         );
         if (prod.isNotEmpty) {
           int currentStock = prod.first['stock'] as int;
-          // هنا بنطرح الكمية لأننا بنلغي المرتجع
           await txn.update(
             'products',
             {'stock': currentStock - (item['quantity'] as int)},
@@ -734,26 +721,18 @@ class DatabaseHelper {
         }
       }
 
-      // 3. حذف أي مدفوعات نقدية مرتبطة بهذا المرتجع (عشان الخزنة تظبط)
-      // بنبحث في جدول المدفوعات عن الملاحظة اللي فيها رقم المرتجع
       await txn.delete(
         'client_payments',
         where: "notes LIKE ?",
         whereArgs: ['%مرتجع #$returnId%'],
       );
 
-      // 4. حذف أصناف المرتجع
       await txn.delete(
         'return_items',
         where: 'returnId = ?',
         whereArgs: [returnId],
       );
-
-      // 5. حذف المرتجع نفسه
       await txn.delete('returns', where: 'id = ?', whereArgs: [returnId]);
-
-      // 6. (اختياري) تحديث إجمالي المرتجعات في جدول المبيعات الأصلي
-      // دي خطوة تكميلية لو حابب الدقة 100% بس مش حرجة أوي للرصيد
     });
   }
 
@@ -769,11 +748,9 @@ class DatabaseHelper {
     }
   }
 
-  // ✅ تعديل دالة صرف النقدية لتستخدم الجدول الجديد
   Future<void> payReturnCash(int returnId, int clientId, double amount) async {
     Database db = await database;
     await db.transaction((txn) async {
-      // 1. تسجيل العملية في جدول المدفوعات (عشان الخزنة)
       await txn.insert('client_payments', {
         'clientId': clientId,
         'amount': amount,
@@ -782,7 +759,6 @@ class DatabaseHelper {
         'type': 'return_refund',
       });
 
-      // 2. تحديث المرتجع نفسه إننا دفعنا جزء منه أو كله
       await txn.rawUpdate(
         'UPDATE returns SET paidAmount = paidAmount + ? WHERE id = ?',
         [amount, returnId],
@@ -790,10 +766,7 @@ class DatabaseHelper {
     });
   }
 
-  // --- المشتريات ومدفوعات الموردين والتقارير ---
-  // (نفس الكود السابق بالكامل)
-  // ==================== (3) الموردين والمشتريات (معدلة بنظام المتوسط المرجح) ====================
-
+  // 🔥 دالة المشتريات المحدثة (تدعم 1% WHT والمتوسط المرجح) 🔥
   Future<void> createPurchase(
     int supplierId,
     double totalAmount,
@@ -801,20 +774,20 @@ class DatabaseHelper {
     String refNumber = '',
     String? customDate,
     double taxAmount = 0.0,
+    double whtAmount = 0.0,
   }) async {
     Database db = await database;
     await db.transaction((txn) async {
-      // 1. إنشاء الفاتورة
       int purchaseId = await txn.insert('purchase_invoices', {
         'supplierId': supplierId,
         'date': customDate ?? DateTime.now().toString(),
         'totalAmount': totalAmount,
         'referenceNumber': refNumber,
         'taxAmount': taxAmount,
+        'whtAmount': whtAmount,
       });
 
       for (var item in items) {
-        // 2. إضافة الأصناف للفاتورة
         await txn.insert('purchase_items', {
           'invoiceId': purchaseId,
           'productId': item['productId'],
@@ -822,47 +795,39 @@ class DatabaseHelper {
           'costPrice': item['price'],
         });
 
-        // 3. تحديث المخزون (بنظام المتوسط المرجح - Weighted Average) 🔥
+        // 3. تحديث المخزون (المتوسط المرجح)
         var prod = await txn.query(
           'products',
           where: 'id = ?',
           whereArgs: [item['productId']],
         );
-
         if (prod.isNotEmpty) {
           int oldStock = prod.first['stock'] as int;
           double oldBuyPrice = (prod.first['buyPrice'] as num).toDouble();
-
           int newQty = item['quantity'] as int;
           double newBuyPrice = (item['price'] as num).toDouble();
 
-          // معادلة المتوسط المرجح
-          double totalOldValue = oldStock * oldBuyPrice; // قيمة القديم
-          double totalNewValue = newQty * newBuyPrice; // قيمة الجديد
-          int totalStock = oldStock + newQty; // العدد الكلي
-
-          // تفادي القسمة على صفر (حماية)
+          double totalOldValue = oldStock * oldBuyPrice;
+          double totalNewValue = newQty * newBuyPrice;
+          int totalStock = oldStock + newQty;
           double weightedAveragePrice = totalStock > 0
               ? (totalOldValue + totalNewValue) / totalStock
               : newBuyPrice;
 
-          // تحديث المنتج بالسعر الجديد (المتوسط) والكمية الجديدة
           await txn.update(
             'products',
-            {
-              'stock': totalStock,
-              'buyPrice': weightedAveragePrice, // 👈 هنا السعر بيبقى المتوسط
-            },
+            {'stock': totalStock, 'buyPrice': weightedAveragePrice},
             where: 'id = ?',
             whereArgs: [item['productId']],
           );
         }
       }
 
-      // 4. تحديث رصيد المورد
+      // 4. تحديث رصيد المورد (الإجمالي - خصم المنبع)
+      double amountToSupplier = totalAmount - whtAmount;
       await txn.rawUpdate(
         'UPDATE suppliers SET balance = balance + ? WHERE id = ?',
-        [totalAmount, supplierId],
+        [amountToSupplier, supplierId],
       );
     });
   }
@@ -954,7 +919,6 @@ class DatabaseHelper {
   }) async {
     Database db = await database;
 
-    // شروط البحث
     String whereClause = 'supplierId = ?';
     List<dynamic> args = [supplierId];
 
@@ -964,21 +928,18 @@ class DatabaseHelper {
       args.add(endDate.add(const Duration(days: 1)).toIso8601String());
     }
 
-    // 1. جلب الفواتير (مشتريات)
     List<Map<String, dynamic>> purchases = await db.query(
       'purchase_invoices',
       where: whereClause,
       whereArgs: args,
     );
 
-    // 2. جلب المدفوعات (سندات دفع)
     List<Map<String, dynamic>> payments = await db.query(
       'supplier_payments',
       where: whereClause,
       whereArgs: args,
     );
 
-    // 3. 🔥 جلب المرتجعات (الجديد)
     List<Map<String, dynamic>> returns = await db.query(
       'purchase_returns',
       where: whereClause,
@@ -987,21 +948,26 @@ class DatabaseHelper {
 
     List<Map<String, dynamic>> statement = [];
 
-    // إضافة المشتريات
     for (var bill in purchases) {
+      // لو فيه خصم منبع، ممكن نوضحه في البيان
+      double wht = (bill['whtAmount'] as num?)?.toDouble() ?? 0.0;
+      String desc = 'فاتورة شراء #${bill['id']}';
+      if (wht > 0) desc += ' (خصم ضريبي: $wht)';
+
       statement.add({
-        'type': 'bill', // فاتورة شراء
+        'type': 'bill',
         'date': bill['date'],
         'amount': (bill['totalAmount'] as num).toDouble(),
-        'description': 'فاتورة شراء #${bill['id']}',
+        'description': desc,
         'id': bill['id'],
+        // بنطرح الخصم من هنا عشان كشف الحساب يطلع "الصافي المستحق" للمورد
+        'wht': wht,
       });
     }
 
-    // إضافة المدفوعات
     for (var pay in payments) {
       statement.add({
-        'type': 'payment', // دفع فلوس للمورد
+        'type': 'payment',
         'date': pay['date'],
         'amount': (pay['amount'] as num).toDouble(),
         'description': pay['notes'],
@@ -1009,18 +975,16 @@ class DatabaseHelper {
       });
     }
 
-    // 🔥 إضافة المرتجعات للقائمة
     for (var ret in returns) {
       statement.add({
-        'type': 'return', // مرتجع بضاعة
+        'type': 'return',
         'date': ret['date'],
         'amount': (ret['totalAmount'] as num).toDouble(),
-        'description': 'مرتجع مشتريات #${ret['id']}', // أو ملاحظات المرتجع
+        'description': 'مرتجع مشتريات #${ret['id']}',
         'id': ret['id'],
       });
     }
 
-    // ترتيب الكل حسب التاريخ
     statement.sort(
       (a, b) => DateTime.parse(a['date']).compareTo(DateTime.parse(b['date'])),
     );
@@ -1030,7 +994,6 @@ class DatabaseHelper {
   Future<Map<String, double>> getGeneralReportData() async {
     Database db = await database;
 
-    // 1. الأرصدة التراكمية (كما هي)
     var inv = await db.rawQuery(
       'SELECT SUM(stock * buyPrice) as t FROM products',
     );
@@ -1045,58 +1008,38 @@ class DatabaseHelper {
     );
     var sup = await db.rawQuery('SELECT SUM(balance) as t FROM suppliers');
 
-    // 2. تجهيز تواريخ الشهر الحالي بدقة (من أول لحظة في الشهر لأول لحظة في الشهر القادم)
     DateTime now = DateTime.now();
-
-    // أول يوم في الشهر الحالي (مثلاً: 2025-12-01 00:00:00)
     String startOfMonth = DateTime(now.year, now.month, 1).toString();
-
-    // أول يوم في الشهر القادم (مثلاً: 2026-01-01 00:00:00)
-    // استخدام هذا الأسلوب يضمن أننا نغطي كل لحظة في الشهر الحالي
     String startOfNextMonth = DateTime(now.year, now.month + 1, 1).toString();
 
-    // 3. الاستعلامات باستخدام المنطق الجديد (>= البداية و < النهاية)
-
-    // أ. المبيعات
     var mSales = await db.rawQuery(
       'SELECT SUM(netAmount) as t FROM sales WHERE date >= ? AND date < ?',
       [startOfMonth, startOfNextMonth],
     );
-
-    // ب. المصاريف
     var mExp = await db.rawQuery(
       'SELECT SUM(amount) as t FROM expenses WHERE date >= ? AND date < ?',
       [startOfMonth, startOfNextMonth],
     );
-
-    // ج. المرتجعات
     var mRet = await db.rawQuery(
       'SELECT SUM(totalAmount) as t FROM returns WHERE date >= ? AND date < ?',
       [startOfMonth, startOfNextMonth],
     );
-
-    // د. 🔥 إجمالي فواتير الشراء (accrual)
     var mPurBills = await db.rawQuery(
       'SELECT SUM(totalAmount) as t FROM purchase_invoices WHERE date >= ? AND date < ?',
       [startOfMonth, startOfNextMonth],
     );
-
-    // هـ. 🔥 المدفوعات للموردين (cash flow)
     var mSupPay = await db.rawQuery(
       'SELECT SUM(amount) as t FROM supplier_payments WHERE date >= ? AND date < ?',
       [startOfMonth, startOfNextMonth],
     );
 
-    // الحسابات النهائية
     double inventory = (inv.first['t'] as num?)?.toDouble() ?? 0.0;
-
     double receivables =
         ((open.first['t'] as num?)?.toDouble() ?? 0) +
         ((sales.first['t'] as num?)?.toDouble() ?? 0) +
         ((clientPay.first['t'] as num?)?.toDouble() ?? 0) -
         ((ret.first['t'] as num?)?.toDouble() ?? 0) -
         ((rec.first['t'] as num?)?.toDouble() ?? 0);
-
     double payables = (sup.first['t'] as num?)?.toDouble() ?? 0.0;
 
     return {
@@ -1106,7 +1049,6 @@ class DatabaseHelper {
       'monthlySales': (mSales.first['t'] as num?)?.toDouble() ?? 0.0,
       'monthlyExpenses': (mExp.first['t'] as num?)?.toDouble() ?? 0.0,
       'monthlyReturns': (mRet.first['t'] as num?)?.toDouble() ?? 0.0,
-      // القيم الجديدة
       'monthlyBills': (mPurBills.first['t'] as num?)?.toDouble() ?? 0.0,
       'monthlyPayments': (mSupPay.first['t'] as num?)?.toDouble() ?? 0.0,
     };
@@ -1136,12 +1078,10 @@ class DatabaseHelper {
   Future<void> close() async {
     if (_database != null) {
       await _database!.close();
-      _database = null; // 🔥🔥 هذا السطر هو الحل السحري
-      // كدة لما تيجي تطلب الداتا تاني، التطبيق هيعمل اتصال جديد أوتوماتيك
+      _database = null;
     }
   }
 
-  // --- 🆕 دالة لمعرفة الكميات التي تم إرجاعها سابقاً لفاتورة معينة ---
   Future<Map<int, int>> getAlreadyReturnedItems(int saleId) async {
     Database db = await database;
     var result = await db.rawQuery(
@@ -1170,7 +1110,6 @@ class DatabaseHelper {
   ) async {
     Database db = await database;
     await db.transaction((txn) async {
-      // أ. تسجيل المرتجع
       int returnId = await txn.insert('purchase_returns', {
         'invoiceId': invoiceId,
         'supplierId': supplierId,
@@ -1179,7 +1118,6 @@ class DatabaseHelper {
         'notes': 'مرتجع مشتريات',
       });
 
-      // ب. تسجيل الأصناف وتحديث المخزون
       for (var item in itemsToReturn) {
         await txn.insert('purchase_return_items', {
           'returnId': returnId,
@@ -1188,7 +1126,6 @@ class DatabaseHelper {
           'price': item['price'],
         });
 
-        // 🔥 تحديث المخزون: هنا بنقلل المخزون (لأننا رجعنا البضاعة للمورد)
         var prod = await txn.query(
           'products',
           where: 'id = ?',
@@ -1198,14 +1135,13 @@ class DatabaseHelper {
           int current = prod.first['stock'] as int;
           await txn.update(
             'products',
-            {'stock': current - (item['quantity'] as int)}, // طرح الكمية
+            {'stock': current - (item['quantity'] as int)},
             where: 'id = ?',
             whereArgs: [item['productId']],
           );
         }
       }
 
-      // ج. تحديث رصيد المورد (بنقلل الفلوس اللي ليه عندنا)
       await txn.rawUpdate(
         'UPDATE suppliers SET balance = balance - ? WHERE id = ?',
         [returnTotal, supplierId],
@@ -1213,7 +1149,6 @@ class DatabaseHelper {
     });
   }
 
-  // دالة جلب قائمة مرتجعات الموردين
   Future<List<Map<String, dynamic>>> getAllPurchaseReturns() async {
     Database db = await database;
     return await db.rawQuery(
@@ -1221,7 +1156,6 @@ class DatabaseHelper {
     );
   }
 
-  // دالة جلب تفاصيل أصناف مرتجع المورد
   Future<List<Map<String, dynamic>>> getPurchaseReturnItems(
     int returnId,
   ) async {
@@ -1232,7 +1166,6 @@ class DatabaseHelper {
     );
   }
 
-  // جلب قيمة الرصيد الافتتاحي الحالي
   Future<double> getSupplierOpeningBalance(int supplierId) async {
     Database db = await database;
     List<Map> result = await db.query(
@@ -1253,7 +1186,6 @@ class DatabaseHelper {
   ) async {
     Database db = await database;
     await db.transaction((txn) async {
-      // 1. نجيب القيمة القديمة المسجلة
       double oldAmount = 0.0;
       List<Map> result = await txn.query(
         'supplier_opening_balances',
@@ -1264,7 +1196,6 @@ class DatabaseHelper {
 
       if (result.isNotEmpty) {
         oldAmount = (result.first['amount'] as num).toDouble();
-        // تحديث السجل الموجود
         await txn.update(
           'supplier_opening_balances',
           {'amount': newAmount},
@@ -1272,7 +1203,6 @@ class DatabaseHelper {
           whereArgs: [supplierId],
         );
       } else {
-        // إنشاء سجل جديد
         await txn.insert('supplier_opening_balances', {
           'supplierId': supplierId,
           'amount': newAmount,
@@ -1281,10 +1211,7 @@ class DatabaseHelper {
         });
       }
 
-      // 2. حساب الفرق (الجديد - القديم)
       double diff = newAmount - oldAmount;
-
-      // 3. تسميع الفرق في رصيد المورد الحالي
       if (diff != 0) {
         await txn.rawUpdate(
           'UPDATE suppliers SET balance = balance + ? WHERE id = ?',
@@ -1296,20 +1223,163 @@ class DatabaseHelper {
 
   Future<String> getDbPath() async {
     Directory dir;
-    // لو كمبيوتر (ويندوز/لينكس) نحفظ في المستندات عشان تكون ظاهرة وسهلة
     if (Platform.isWindows || Platform.isLinux) {
       dir = await getApplicationDocumentsDirectory();
-      dir = Directory(join(dir.path, 'AlSakr_Data')); // مجلد خاص بالبرنامج
+      dir = Directory(join(dir.path, 'AlSakr_Data'));
     } else {
-      // لو موبايل (أندرويد)
-      dir = await getApplicationDocumentsDirectory(); // أو getDatabasesPath()
+      dir = await getApplicationDocumentsDirectory();
     }
 
-    // التأكد من وجود المجلد
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
 
     return join(dir.path, _dbName);
+  }
+  // ==================== أذونات التسليم (Delivery Orders) ====================
+
+  // إنشاء إذن جديد
+  // إنشاء إذن جديد (محدث)
+  Future<void> createDeliveryOrder(
+    String clientName,
+    String supplyOrderNumber,
+    String manualNo, // 👈 معامل جديد
+    String address,
+    String date,
+    String notes,
+    List<Map<String, dynamic>> items,
+  ) async {
+    Database db = await database;
+    await db.transaction((txn) async {
+      // 1. إدراج البيانات الأساسية للإذن
+      int orderId = await txn.insert('delivery_orders', {
+        'clientName': clientName,
+        'supplyOrderNumber': supplyOrderNumber,
+        'manualNo': manualNo, // 👈 تخزين الرقم
+        'deliveryDate': date,
+        'address': address,
+        'notes': notes,
+      });
+
+      // 2. إدراج الأصناف
+      for (var item in items) {
+        await txn.insert('delivery_items', {
+          'orderId': orderId,
+          'productName': item['productName'],
+          'quantity': item['quantity'],
+          'description': item['description'] ?? '',
+          'relatedSupplyOrder': item['relatedSupplyOrder'] ?? '',
+        });
+      }
+    });
+  }
+
+  // جلب كل الأذونات (للعرض والبحث)
+  Future<List<Map<String, dynamic>>> getAllDeliveryOrders() async {
+    Database db = await database;
+    return await db.query(
+      'delivery_orders',
+      orderBy: "id DESC",
+    ); // الأحدث أولاً
+  }
+
+  // جلب أصناف إذن معين (للتفاصيل)
+  Future<List<Map<String, dynamic>>> getDeliveryOrderItems(int orderId) async {
+    Database db = await database;
+    return await db.query(
+      'delivery_items',
+      where: 'orderId = ?',
+      whereArgs: [orderId],
+    );
+  }
+
+  // حذف إذن
+  Future<void> deleteDeliveryOrder(int id) async {
+    Database db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('delivery_items', where: 'orderId = ?', whereArgs: [id]);
+      await txn.delete('delivery_orders', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  // 1. دالة تحديث الإذن بالكامل (للتعديل)
+  Future<void> updateDeliveryOrder(
+    int orderId,
+    String clientName,
+    String supplyOrderNumber,
+    String manualNo,
+    String address,
+    String date,
+    String notes,
+    List<Map<String, dynamic>> newItems,
+  ) async {
+    Database db = await database;
+    await db.transaction((txn) async {
+      // أ. تحديث البيانات الأساسية
+      await txn.update(
+        'delivery_orders',
+        {
+          'clientName': clientName,
+          'supplyOrderNumber': supplyOrderNumber,
+          'manualNo': manualNo,
+          'deliveryDate': date,
+          'address': address,
+          'notes': notes,
+        },
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+
+      // ب. حذف الأصناف القديمة بالكامل
+      await txn.delete(
+        'delivery_items',
+        where: 'orderId = ?',
+        whereArgs: [orderId],
+      );
+
+      // ج. إدراج الأصناف الجديدة (نفس كود الإضافة)
+      for (var item in newItems) {
+        await txn.insert('delivery_items', {
+          'orderId': orderId,
+          'productName': item['productName'],
+          'quantity': item['quantity'],
+          'description': item['description'] ?? '',
+          'relatedSupplyOrder': item['relatedSupplyOrder'] ?? '',
+        });
+      }
+    });
+  }
+
+  // 2. دالة قفل/فتح الإذن
+  Future<void> toggleOrderLock(
+    int orderId,
+    bool isLocked, {
+    String? imagePath,
+  }) async {
+    Database db = await database;
+    Map<String, dynamic> values = {'isLocked': isLocked ? 1 : 0};
+
+    // لو فيه صورة جاية، احفظها. لو مفيش (أو بنفتح القفل) ممكن نسيب القديمة أو نعدلها حسب الرغبة
+    if (imagePath != null) {
+      values['signedImagePath'] = imagePath;
+    }
+
+    await db.update(
+      'delivery_orders',
+      values,
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
+  }
+
+  // دالة لتحديث مسار الصورة فقط (لتغييرها أو حذفها)
+  Future<void> updateOrderImage(int orderId, String? imagePath) async {
+    Database db = await database;
+    await db.update(
+      'delivery_orders',
+      {'signedImagePath': imagePath}, // لو null هيمسحها
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
   }
 }

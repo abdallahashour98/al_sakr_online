@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: ^3.10.4
@@ -40,7 +40,7 @@ dependencies:
   permission_handler: ^11.1.0 # عشان نستأذن الموبايل نوصل للملفات
   excel: ^4.0.0 # للتعامل مع ملفات xlsx
   image_picker: ^1.0.4
-  archive: ^3.3.7
+  archive: ^3.6.1
   cupertino_icons: ^1.0.8
   sentry_flutter: ^9.9.1
   msix: ^3.16.1
@@ -51,6 +51,14 @@ dependencies:
   sqlite3_flutter_libs: ^0.5.20
   http: ^1.1.0
   shared_preferences: ^2.2.2
+  pdf: ^3.10.4
+  open_file: ^3.5.10
+  printing: ^5.11.0
+  docx_template: ^0.4.0
+  syncfusion_flutter_pdf: ^24.1.41
+  syncfusion_flutter_core: ^24.1.41
+  arabic_reshaper: ^0.0.1
+
   
 
   # The following adds the Cupertino Icons font to your application.
@@ -97,7 +105,15 @@ flutter:
 
 
   assets:
-    - assets/
+    - assets/splash_logo.png
+    - assets/fonts/Cairo-Regular.ttf
+    - assets/fonts/Cairo-Bold.ttf
+    - assets/fonts/Traditional-Arabic.ttf
+    - assets/fonts/Tinos-Regular.ttf
+    - assets/fonts/Tinos-Bold.ttf
+    - assets/fonts/Amiri-Regular.ttf
+    - assets/fonts/Amiri-Bold.ttf
+    - assets/delivery_template.docx
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -140,3 +156,5 @@ msix_config:
   capabilities: internetClient
   install_certificate: false
   create_desktop_shortcut: true
+
+

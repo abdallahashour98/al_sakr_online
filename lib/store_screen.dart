@@ -30,6 +30,7 @@ class _StoreScreenState extends State<StoreScreen> {
   final _notesController = TextEditingController();
   final _searchController = TextEditingController();
 
+  final _damagedStockController = TextEditingController();
   String _selectedUnit = 'قطعة';
   DateTime? _expiryDate;
   String? _selectedImagePath;
@@ -141,8 +142,12 @@ class _StoreScreenState extends State<StoreScreen> {
         int reorder = p['reorderLevel'] ?? 0;
         return stock <= reorder;
       }).toList();
+    } else if (_filterType == 'damaged') {
+      results = results.where((p) {
+        int damaged = p['damagedStock'] ?? 0;
+        return damaged > 0; // هات الأصناف اللي التالف فيها أكبر من صفر
+      }).toList();
     }
-
     if (keyword.isNotEmpty) {
       results = results.where((product) {
         final name = product['name'].toString().toLowerCase();
@@ -201,6 +206,13 @@ class _StoreScreenState extends State<StoreScreen> {
                 'low_stock',
                 Icons.trending_down,
                 Colors.orange,
+              ),
+              _buildFilterOption(
+                ctx,
+                "التوالف",
+                'damaged',
+                Icons.broken_image, // أيقونة معبرة
+                Colors.redAccent,
               ),
               _buildFilterOption(
                 ctx,
@@ -350,6 +362,7 @@ class _StoreScreenState extends State<StoreScreen> {
     _stockController.clear();
     _reorderLevelController.clear();
     _notesController.clear();
+    _damagedStockController.clear(); // 🆕 ضيف ده
     _selectedUnit = _units.isNotEmpty ? _units.first : 'قطعة';
     _expiryDate = null;
     _selectedImagePath = null;
@@ -367,6 +380,7 @@ class _StoreScreenState extends State<StoreScreen> {
       _minSellPriceController.text = product['minSellPrice']?.toString() ?? '0';
       _stockController.text = product['stock'].toString();
       _reorderLevelController.text = product['reorderLevel']?.toString() ?? '0';
+      _damagedStockController.text = (product['damagedStock'] ?? 0).toString();
       _notesController.text = product['notes'] ?? '';
       _selectedUnit =
           product['unit'] ?? (_units.isNotEmpty ? _units.first : 'قطعة');
@@ -620,9 +634,18 @@ class _StoreScreenState extends State<StoreScreen> {
                         Expanded(
                           child: _buildTextField(
                             _stockController,
-                            'الرصيد الحالي',
+                            'الرصيد السليم',
                             Icons.inventory,
                             isNumber: true, // ✅ تقبل أرقام فقط
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _buildTextField(
+                            _damagedStockController, // 🆕 خانة التوالف
+                            'التوالف/هالك',
+                            Icons.broken_image_outlined,
+                            isNumber: true,
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -679,6 +702,8 @@ class _StoreScreenState extends State<StoreScreen> {
                     'stock': int.tryParse(_stockController.text) ?? 0,
                     'reorderLevel':
                         int.tryParse(_reorderLevelController.text) ?? 0,
+                    'damagedStock':
+                        int.tryParse(_damagedStockController.text) ?? 0,
                     'supplierId': null,
                     'notes': _notesController.text,
                     'expiryDate': _expiryDate?.toString(),
@@ -831,6 +856,7 @@ class _StoreScreenState extends State<StoreScreen> {
 
                       int stock = product['stock'] ?? 0;
                       int reorder = product['reorderLevel'] ?? 0;
+                      int damaged = product['damagedStock'] ?? 0;
                       bool isLowStock = stock <= reorder;
                       int expiryStatus = _checkExpiryStatus(product);
 
@@ -951,6 +977,16 @@ class _StoreScreenState extends State<StoreScreen> {
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
+                                  if (damaged > 0) ...[
+                                    const SizedBox(width: 15),
+                                    Text(
+                                      'تالف: $damaged',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.red, // لون مميز
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                               if (product['expiryDate'] != null)

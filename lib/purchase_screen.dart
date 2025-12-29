@@ -1,10 +1,8 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'db_helper.dart';
-// للتعامل مع ملفات الصور
-import 'package:image_picker/image_picker.dart'; // لاختيار الصور من المعرض
-import 'package:path_provider/path_provider.dart'; // للحصول على مسار حفظ الصور
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 class PurchaseScreen extends StatefulWidget {
   const PurchaseScreen({super.key});
@@ -14,29 +12,54 @@ class PurchaseScreen extends StatefulWidget {
 }
 
 class _PurchaseScreenState extends State<PurchaseScreen> {
+  // --- المتغيرات ---
   List<Map<String, dynamic>> _suppliers = [];
   List<Map<String, dynamic>> _products = [];
   final List<Map<String, dynamic>> _cart = [];
   List<String> _units = [];
 
   int? _selectedSupplierId;
+  int? _selectedProductId;
+
   final TextEditingController _supplierSearchController =
       TextEditingController();
-
-  int? _selectedProductId;
   final TextEditingController _productSearchController =
       TextEditingController();
-
   final TextEditingController _costPriceController = TextEditingController();
   final TextEditingController _qtyController = TextEditingController();
   final TextEditingController _refNumController = TextEditingController();
+  final TextEditingController _discountController = TextEditingController(
+    text: '0',
+  );
 
   DateTime _invoiceDate = DateTime.now();
 
-  // 🆕 متغير للتحكم في الضريبة
-  bool _isTaxEnabled = false;
+  // إعدادات الفاتورة
+  bool _isTaxEnabled = false; // 14%
+  bool _isWhtEnabled = false; // 1%
+  bool _isCashPayment = false; // المشتريات غالباً آجل
 
-  // 🆕 دوال الحسابات (قبل وبعد الضريبة)
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final suppliers = await DatabaseHelper().getSuppliers();
+    final products = await DatabaseHelper().getProducts();
+    final unitsData = await DatabaseHelper().getUnits();
+
+    if (mounted) {
+      setState(() {
+        _suppliers = suppliers;
+        _products = products;
+        _units = unitsData.map((u) => u['name'] as String).toList();
+      });
+    }
+  }
+
+  // --- الحسابات ---
   double get _subTotal {
     double sum = 0;
     for (var item in _cart) {
@@ -45,10 +68,18 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     return sum;
   }
 
-  double get _taxAmount => _isTaxEnabled ? _subTotal * 0.14 : 0.0;
+  double get _discount => double.tryParse(_discountController.text) ?? 0.0;
 
-  double get _grandTotal => _subTotal + _taxAmount;
-  // دالة مساعدة لعرض الصورة أو اللوجو الافتراضي (مثل شاشة المبيعات)
+  // الضريبة تضاف (14%)
+  double get _taxAmount => _isTaxEnabled ? (_subTotal - _discount) * 0.14 : 0.0;
+
+  // ضريبة الخصم 1% (تضاف للمبلغ)
+  double get _whtAmount => _isWhtEnabled ? (_subTotal - _discount) * 0.01 : 0.0;
+
+  // الإجمالي النهائي
+  double get _grandTotal => (_subTotal - _discount) + _taxAmount - _whtAmount;
+
+  // --- الصور ---
   Widget _buildProductImage(String? imagePath, {double size = 45}) {
     if (imagePath != null && File(imagePath).existsSync()) {
       return ClipRRect(
@@ -74,492 +105,257 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _loadData();
-  }
-
-  Future<void> _loadData() async {
-    final suppliers = await DatabaseHelper().getSuppliers();
-    final products = await DatabaseHelper().getProducts();
-    final unitsData = await DatabaseHelper().getUnits();
-
-    if (mounted) {
-      setState(() {
-        _suppliers = suppliers;
-        _products = products;
-        _units = unitsData.map((u) => u['name'] as String).toList();
-      });
-    }
-  }
-
-  // --- دوال إضافة مورد وصنف (كما هي) ---
+  // --- إضافة مورد ---
   Future<void> _showAddSupplierDialog() async {
     final nameController = TextEditingController();
-    final codeController = TextEditingController();
-    final contactController = TextEditingController();
     final phoneController = TextEditingController();
-    final addressController = TextEditingController();
-    final notesController = TextEditingController();
     final balanceController = TextEditingController();
     bool isLiability = true;
 
     await showDialog(
       context: context,
-      barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setStateSB) {
-          final isDark = Theme.of(context).brightness == Brightness.dark;
-          return AlertDialog(
-            title: const Text('إضافة مورد جديد'),
-            content: SizedBox(
-              width: 600,
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+        builder: (ctx, setStateSB) => AlertDialog(
+          title: const Text('إضافة مورد جديد'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'اسم المورد/الشركة',
+                    prefixIcon: Icon(Icons.business),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'رقم الهاتف',
+                    prefixIcon: Icon(Icons.phone),
+                  ),
+                ),
+                const Divider(),
+                const Text(
+                  "الرصيد الافتتاحي",
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                TextField(
+                  controller: balanceController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'المبلغ',
+                    prefixIcon: Icon(Icons.account_balance_wallet),
+                  ),
+                ),
+                Row(
                   children: [
-                    _buildSectionTitle('البيانات الأساسية', isDark),
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 1,
-                          child: _buildTextField(
-                            codeController,
-                            'كود المورد',
-                            Icons.qr_code,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: _buildTextField(
-                            nameController,
-                            'اسم المورد/الشركة',
-                            Icons.business,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    _buildTextField(
-                      contactController,
-                      'اسم المسؤول',
-                      Icons.person,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildTextField(
-                      phoneController,
-                      'التليفون / الموبايل',
-                      Icons.phone,
-                      isNumber: true,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildTextField(
-                      addressController,
-                      'العنوان',
-                      Icons.location_on,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildTextField(notesController, 'ملاحظات', Icons.note),
-                    const SizedBox(height: 20),
-                    _buildSectionTitle('الرصيد الافتتاحي', isDark),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildTextField(
-                            balanceController,
-                            'المبلغ',
-                            Icons.account_balance_wallet,
-                            isNumber: true,
-                          ),
-                        ),
-                        const SizedBox(width: 15),
-                        Column(
-                          children: [
-                            Row(
-                              children: [
-                                Radio<bool>(
-                                  value: true,
-                                  groupValue: isLiability,
-                                  activeColor: Colors.red,
-                                  onChanged: (val) =>
-                                      setStateSB(() => isLiability = val!),
-                                ),
-                                const Text(
-                                  "علينا (له)",
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                Radio<bool>(
-                                  value: false,
-                                  groupValue: isLiability,
-                                  activeColor: Colors.green,
-                                  onChanged: (val) =>
-                                      setStateSB(() => isLiability = val!),
-                                ),
-                                const Text(
-                                  "لنا (عليه)",
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('إلغاء'),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[800],
-                ),
-                onPressed: () async {
-                  if (nameController.text.isNotEmpty) {
-                    double amount =
-                        double.tryParse(balanceController.text) ?? 0.0;
-                    double finalBalance = isLiability ? amount : -amount;
-                    int id = await DatabaseHelper().insertSupplier({
-                      'name': nameController.text,
-                      'code': codeController.text,
-                      'contactPerson': contactController.text,
-                      'phone': phoneController.text,
-                      'address': addressController.text,
-                      'notes': notesController.text,
-                      'balance': finalBalance,
-                    });
-                    Navigator.pop(ctx);
-                    await _loadData();
-                    setState(() {
-                      _selectedSupplierId = id;
-                      _supplierSearchController.text = nameController.text;
-                    });
-                    if (mounted)
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('تم إضافة المورد بنجاح ✅'),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                  }
-                },
-                child: const Text(
-                  'حفظ البيانات',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // ===========================================================================
-  // ديالوج إضافة صنف جديد (متطور مع دعم الصور)
-  // ===========================================================================
-  Future<void> _showAddProductDialog() async {
-    // تعريف المتحكمات للحقول
-    final nameController = TextEditingController();
-    final codeController = TextEditingController();
-    final barcodeController = TextEditingController();
-    final buyPriceController = TextEditingController();
-    final sellPriceController = TextEditingController();
-    final stockController = TextEditingController(
-      text: '0',
-    ); // المخزن الافتراضي 0
-    final reorderLevelController = TextEditingController(
-      text: '5',
-    ); // حد الطلب الافتراضي
-    final notesController = TextEditingController();
-    String? selectedImagePath; // متغير لتخزين مسار الصورة المختار
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false, // منع الإغلاق بالضغط خارج الديالوج
-      builder: (ctx) => StatefulBuilder(
-        // StatefulBuilder مهم جداً لتحديث الصورة عند اختيارها
-        builder: (context, setStateSB) {
-          final isDark = Theme.of(context).brightness == Brightness.dark;
-
-          // --- دالة اختيار الصورة وحفظها ---
-          Future<void> pickImage() async {
-            final picker = ImagePicker();
-            // فتح معرض الصور
-            final pickedFile = await picker.pickImage(
-              source: ImageSource.gallery,
-            );
-
-            if (pickedFile != null) {
-              // الحصول على مسار مجلد المستندات الخاص بالتطبيق
-              final appDir = await getApplicationSupportDirectory();
-              final imagesDir = Directory('${appDir.path}/product_images');
-              // إنشاء المجلد لو مش موجود
-              if (!await imagesDir.exists()) {
-                await imagesDir.create(recursive: true);
-              }
-              // تسمية الصورة باسم فريد بناءً على الوقت الحالي
-              final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
-              // نسخ الصورة للمسار الجديد
-              final savedImage = await File(
-                pickedFile.path,
-              ).copy('${imagesDir.path}/$fileName');
-
-              // تحديث الواجهة لعرض الصورة المختارة
-              setStateSB(() {
-                selectedImagePath = savedImage.path;
-              });
-            }
-          }
-
-          return AlertDialog(
-            title: const Text('إضافة صنف جديد متطور'),
-            content: SizedBox(
-              width: 500, // عرض مناسب للديالوج
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // --- منطقة اختيار الصورة (أيقونة الكاميرا) ---
-                    GestureDetector(
-                      onTap: pickImage,
-                      child: CircleAvatar(
-                        radius: 50,
-                        backgroundColor: isDark
-                            ? Colors.grey[800]
-                            : Colors.grey[200],
-                        // عرض الصورة إذا تم اختيارها، وإلا عرض أيقونة الإضافة
-                        backgroundImage: selectedImagePath != null
-                            ? FileImage(File(selectedImagePath!))
-                            : null,
-                        child: selectedImagePath == null
-                            ? Icon(
-                                Icons.add_a_photo,
-                                size: 35,
-                                color: isDark
-                                    ? Colors.grey[400]
-                                    : Colors.grey[600],
-                              )
-                            : null,
+                    Expanded(
+                      child: RadioListTile<bool>(
+                        title: const Text("علينا (له)"),
+                        value: true,
+                        groupValue: isLiability,
+                        activeColor: Colors.red,
+                        onChanged: (v) => setStateSB(() => isLiability = v!),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      "اضغط لإضافة صورة المنتج",
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                    const Divider(height: 25),
-
-                    // --- حقول البيانات ---
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'اسم الصنف *',
-                        prefixIcon: Icon(Icons.shopping_bag),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 15),
-
-                    // صف الأكواد
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildDialogTextField(
-                            codeController,
-                            'كود داخلي',
-                            Icons.qr_code,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _buildDialogTextField(
-                            barcodeController,
-                            'باركود',
-                            Icons.qr_code_scanner,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 15),
-
-                    // صف الأسعار (مهم جداً في التوريد)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildDialogTextField(
-                            buyPriceController,
-                            'سعر الشراء *',
-                            Icons.monetization_on,
-                            isNumber: true,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _buildDialogTextField(
-                            sellPriceController,
-                            'سعر البيع',
-                            Icons.sell,
-                            isNumber: true,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 15),
-
-                    // صف المخزون وحد الطلب
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildDialogTextField(
-                            stockController,
-                            'الرصيد الافتتاحي',
-                            Icons.inventory_2,
-                            isNumber: true,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _buildDialogTextField(
-                            reorderLevelController,
-                            'حد التنبيه',
-                            Icons.add_alert,
-                            isNumber: true,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 15),
-
-                    // الملاحظات
-                    TextField(
-                      controller: notesController,
-                      decoration: const InputDecoration(
-                        labelText: 'ملاحظات إضافية',
-                        prefixIcon: Icon(Icons.note),
-                        border: OutlineInputBorder(),
+                    Expanded(
+                      child: RadioListTile<bool>(
+                        title: const Text("لنا (عليه)"),
+                        value: false,
+                        groupValue: isLiability,
+                        activeColor: Colors.green,
+                        onChanged: (v) => setStateSB(() => isLiability = v!),
                       ),
                     ),
                   ],
                 ),
-              ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('إلغاء'),
-              ),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).primaryColor,
-                  foregroundColor: Colors.white,
-                ),
-                icon: const Icon(Icons.check),
-                label: const Text('حفظ الصنف'),
-                onPressed: () async {
-                  // التحقق من الحقول الإجبارية
-                  if (nameController.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('يرجى كتابة اسم الصنف!'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                    return;
-                  }
-                  if (buyPriceController.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('يرجى تحديد سعر الشراء المبدئي!'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                    return;
-                  }
-
-                  // تجهيز البيانات للحفظ
-                  Map<String, dynamic> row = {
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.isNotEmpty) {
+                  double amount =
+                      double.tryParse(balanceController.text) ?? 0.0;
+                  double finalBalance = isLiability ? amount : -amount;
+                  int id = await DatabaseHelper().insertSupplier({
                     'name': nameController.text,
-                    'code': codeController.text,
-                    'barcode': barcodeController.text,
-                    'buyPrice': double.tryParse(buyPriceController.text) ?? 0.0,
-                    'sellPrice':
-                        double.tryParse(sellPriceController.text) ?? 0.0,
-                    'stock': int.tryParse(stockController.text) ?? 0,
-                    'reorderLevel':
-                        int.tryParse(reorderLevelController.text) ?? 0,
-                    'notes': notesController.text,
-                    'imagePath':
-                        selectedImagePath, // 🔥🔥 حفظ مسار الصورة في قاعدة البيانات 🔥🔥
-                  };
-
-                  // إدخال الصنف في قاعدة البيانات والحصول على الـ ID الجديد
-                  int newProductId = await DatabaseHelper().insertProduct(row);
-
-                  Navigator.pop(ctx); // إغلاق الديالوج
-
-                  // تحديث البيانات واختيار الصنف الجديد تلقائياً في شاشة التوريد
+                    'phone': phoneController.text,
+                    'balance': finalBalance,
+                  });
+                  if (amount > 0) {
+                    await DatabaseHelper().updateSupplierOpeningBalance(
+                      id,
+                      finalBalance,
+                    );
+                  }
+                  Navigator.pop(ctx);
                   await _loadData();
                   setState(() {
-                    _selectedProductId = newProductId;
-                    _productSearchController.text = nameController.text;
-                    // تعيين سعر الشراء المدخل في الديالوج كخيار افتراضي في الفاتورة
-                    _costPriceController.text = buyPriceController.text;
+                    _selectedSupplierId = id;
+                    _supplierSearchController.text = nameController.text;
                   });
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'تم إضافة الصنف "${nameController.text}" بنجاح ✅',
-                      ),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                },
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // --- دالة مساعدة لتقليل تكرار كود الـ TextField داخل الديالوج ---
-  Widget _buildDialogTextField(
-    TextEditingController controller,
-    String label,
-    IconData icon, {
-    bool isNumber = false,
-  }) {
-    return TextField(
-      controller: controller,
-      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, size: 20),
-        border: const OutlineInputBorder(),
-        isDense: true, // لجعل الحقل أصغر قليلاً
-        contentPadding: const EdgeInsets.symmetric(
-          vertical: 12,
-          horizontal: 10,
+                }
+              },
+              child: const Text('حفظ'),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  // ... (دوال البحث _showSearchDialog كما هي) ...
+  // --- إضافة صنف ---
+  Future<void> _showAddProductDialog() async {
+    final nameController = TextEditingController();
+    final codeController = TextEditingController();
+    final buyPriceController = TextEditingController();
+    final sellPriceController = TextEditingController();
+    final stockController = TextEditingController(text: '0');
+    String selectedUnit = _units.isNotEmpty ? _units.first : 'قطعة';
+    String? selectedImagePath;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setStateSB) => AlertDialog(
+          title: const Text('إضافة صنف جديد'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onTap: () async {
+                    final picker = ImagePicker();
+                    final picked = await picker.pickImage(
+                      source: ImageSource.gallery,
+                    );
+                    if (picked != null) {
+                      final appDir = await getApplicationSupportDirectory();
+                      final fileName =
+                          '${DateTime.now().millisecondsSinceEpoch}.jpg';
+                      final saved = await File(
+                        picked.path,
+                      ).copy('${appDir.path}/$fileName');
+                      setStateSB(() => selectedImagePath = saved.path);
+                    }
+                  },
+                  child: CircleAvatar(
+                    radius: 35,
+                    backgroundImage: selectedImagePath != null
+                        ? FileImage(File(selectedImagePath!))
+                        : null,
+                    child: selectedImagePath == null
+                        ? const Icon(Icons.add_a_photo)
+                        : null,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'اسم الصنف',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: codeController,
+                        decoration: const InputDecoration(
+                          labelText: 'كود',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: TextField(
+                        controller: stockController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'رصيد',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: buyPriceController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'سعر الشراء',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: TextField(
+                        controller: sellPriceController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'سعر البيع',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.isNotEmpty) {
+                  int id = await DatabaseHelper().insertProduct({
+                    'name': nameController.text,
+                    'code': codeController.text,
+                    'unit': selectedUnit,
+                    'buyPrice': double.tryParse(buyPriceController.text) ?? 0.0,
+                    'sellPrice':
+                        double.tryParse(sellPriceController.text) ?? 0.0,
+                    'stock': int.tryParse(stockController.text) ?? 0,
+                    'imagePath': selectedImagePath,
+                  });
+                  Navigator.pop(ctx);
+                  await _loadData();
+                  setState(() {
+                    _selectedProductId = id;
+                    _productSearchController.text = nameController.text;
+                    _costPriceController.text = buyPriceController.text;
+                  });
+                }
+              },
+              child: const Text('حفظ'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- البحث ---
   void _showSearchDialog({required bool isSupplier}) {
     showDialog(
       context: context,
@@ -567,147 +363,81 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         String query = '';
         return StatefulBuilder(
           builder: (ctx, setStateSB) {
-            var filteredList = [];
-            if (isSupplier) {
-              filteredList = _suppliers
-                  .where(
-                    (s) =>
-                        s['name'].toLowerCase().contains(query.toLowerCase()),
-                  )
-                  .toList();
-            } else {
-              filteredList = _products
-                  .where(
-                    (p) =>
-                        p['name'].toLowerCase().contains(query.toLowerCase()) ||
-                        (p['code'] ?? '').contains(query) ||
-                        (p['barcode'] ?? '').contains(query),
-                  )
-                  .toList();
-            }
+            var filteredList = isSupplier
+                ? _suppliers
+                      .where(
+                        (s) => s['name'].toLowerCase().contains(
+                          query.toLowerCase(),
+                        ),
+                      )
+                      .toList()
+                : _products
+                      .where(
+                        (p) =>
+                            p['name'].toLowerCase().contains(
+                              query.toLowerCase(),
+                            ) ||
+                            (p['code'] ?? '').contains(query),
+                      )
+                      .toList();
             return AlertDialog(
-              title: Row(
-                children: [
-                  Expanded(
-                    child: Text(isSupplier ? 'بحث عن مورد' : 'بحث عن صنف'),
-                  ),
-                  if (!isSupplier)
-                    IconButton(
-                      icon: const Icon(Icons.add_box, color: Colors.blue),
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        await _showAddProductDialog();
-                      },
-                    ),
-                ],
-              ),
+              title: Text(isSupplier ? 'بحث عن مورد' : 'بحث عن صنف'),
               content: SizedBox(
                 width: double.maxFinite,
-                height: 400, // زيادة الارتفاع ليتناسب مع التصميم الجديد
+                height: 400,
                 child: Column(
                   children: [
                     TextField(
                       autofocus: true,
                       decoration: const InputDecoration(
-                        hintText: 'بحث باسم، كود، باركود...',
+                        hintText: 'بحث...',
                         prefixIcon: Icon(Icons.search),
                       ),
                       onChanged: (val) => setStateSB(() => query = val),
                     ),
                     const SizedBox(height: 10),
                     Expanded(
-                      child: filteredList.isEmpty
-                          ? const Center(child: Text('لا توجد نتائج'))
-                          : ListView.separated(
-                              separatorBuilder: (c, i) => const Divider(),
-                              itemCount: filteredList.length,
-                              itemBuilder: (context, index) {
-                                final item = filteredList[index];
-
-                                if (isSupplier) {
-                                  // شكل عرض المورد (بسيط)
-                                  return ListTile(
-                                    leading: const CircleAvatar(
-                                      child: Icon(Icons.person),
-                                    ),
-                                    title: Text(item['name']),
-                                    onTap: () {
-                                      setState(() {
-                                        _selectedSupplierId = item['id'];
-                                        _supplierSearchController.text =
-                                            item['name'];
-                                      });
-                                      Navigator.pop(ctx);
-                                    },
-                                  );
-                                } else {
-                                  // الشكل المطور لعرض الصنف (مثل المبيعات)
-                                  return ListTile(
-                                    leading: _buildProductImage(
-                                      item['imagePath'],
-                                    ),
-                                    title: Text(
-                                      item['name'],
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    subtitle: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          "كود: ${item['code'] ?? '-'}",
-                                          style: const TextStyle(fontSize: 12),
-                                        ),
-                                        Text(
-                                          "مخزن: ${item['stock']}",
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                            color: (item['stock'] ?? 0) <= 0
-                                                ? Colors.red
-                                                : Colors.green,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    trailing: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          "${item['buyPrice']} ج.م",
-                                          style: const TextStyle(
-                                            color: Colors.blue,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        const Text(
-                                          "سعر الشراء",
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.grey,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    onTap: () {
-                                      setState(() {
-                                        _selectedProductId = item['id'];
-                                        _productSearchController.text =
-                                            item['name'];
-                                        _costPriceController.text =
-                                            item['buyPrice'].toString();
-                                      });
-                                      Navigator.pop(ctx);
-                                    },
-                                  );
-                                }
+                      child: ListView.separated(
+                        separatorBuilder: (c, i) => const Divider(),
+                        itemCount: filteredList.length,
+                        itemBuilder: (context, index) {
+                          final item = filteredList[index];
+                          if (isSupplier) {
+                            return ListTile(
+                              leading: const CircleAvatar(
+                                child: Icon(Icons.person),
+                              ),
+                              title: Text(item['name']),
+                              onTap: () {
+                                setState(() {
+                                  _selectedSupplierId = item['id'];
+                                  _supplierSearchController.text = item['name'];
+                                });
+                                Navigator.pop(ctx);
                               },
-                            ),
+                            );
+                          } else {
+                            return ListTile(
+                              leading: _buildProductImage(item['imagePath']),
+                              title: Text(item['name']),
+                              subtitle: Text("مخزن: ${item['stock']}"),
+                              trailing: Text(
+                                "${item['buyPrice']}",
+                                style: const TextStyle(color: Colors.grey),
+                              ),
+                              onTap: () {
+                                setState(() {
+                                  _selectedProductId = item['id'];
+                                  _productSearchController.text = item['name'];
+                                  _costPriceController.text = item['buyPrice']
+                                      .toString();
+                                });
+                                Navigator.pop(ctx);
+                              },
+                            );
+                          }
+                        },
+                      ),
                     ),
                   ],
                 ),
@@ -727,6 +457,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     final product = _products.firstWhere((p) => p['id'] == _selectedProductId);
     int qty = int.tryParse(_qtyController.text) ?? 0;
     double cost = double.tryParse(_costPriceController.text) ?? 0.0;
+    if (qty <= 0) return;
 
     setState(() {
       _cart.add({
@@ -751,14 +482,14 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
       return;
     }
 
-    // 🆕 إرسال البيانات (شاملة الضريبة) للداتا بيز
     await DatabaseHelper().createPurchase(
       _selectedSupplierId!,
-      _grandTotal, // نرسل الإجمالي النهائي ليشمل الضريبة في رصيد المورد
+      _grandTotal, // الإجمالي النهائي
       _cart,
       refNumber: _refNumController.text,
       customDate: _invoiceDate.toString(),
-      taxAmount: _taxAmount, // 🆕 إرسال قيمة الضريبة للحفظ
+      taxAmount: _taxAmount,
+      whtAmount: _whtAmount,
     );
 
     if (!mounted) return;
@@ -771,54 +502,21 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     Navigator.pop(context);
   }
 
-  // --- دوال مساعدة للتصميم ---
-  Widget _buildTextField(
-    TextEditingController controller,
-    String label,
-    IconData icon, {
-    bool isNumber = false,
-  }) {
-    return TextField(
-      controller: controller,
-      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, size: 20),
-        border: const OutlineInputBorder(),
-        isDense: true,
-      ),
-    );
-  }
-
-  Widget _buildSectionTitle(String title, bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 14,
-          color: isDark ? Colors.tealAccent : Colors.teal[800],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color accentColor = isDark ? Colors.brown[300]! : Colors.brown;
+    final accentColor = isDark ? Colors.brown[300]! : Colors.brown[700]!;
+    final blueColor = Colors.blue[800]!;
 
     return Scaffold(
       appBar: AppBar(title: const Text('فاتورة مشتريات (توريد)')),
       body: Column(
         children: [
-          // ... (الجزء العلوي كما هو: المورد، التاريخ، الأصناف) ...
-          // للاختصار سأعيد كتابة الهيكل الأساسي
+          // 1. الجزء العلوي
           Card(
-            margin: const EdgeInsets.all(12),
+            margin: const EdgeInsets.all(10),
             child: Padding(
-              padding: const EdgeInsets.all(15.0),
+              padding: const EdgeInsets.all(12.0),
               child: Column(
                 children: [
                   Row(
@@ -832,15 +530,16 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                           decoration: InputDecoration(
                             labelText: 'المورد',
                             prefixIcon: const Icon(Icons.local_shipping),
+                            border: const OutlineInputBorder(),
+                            isDense: true,
                             suffixIcon: IconButton(
                               icon: const Icon(Icons.add_circle),
                               onPressed: _showAddSupplierDialog,
                             ),
-                            border: const OutlineInputBorder(),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: InkWell(
                           onTap: () async {
@@ -856,9 +555,11 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                             decoration: const InputDecoration(
                               labelText: 'التاريخ',
                               border: OutlineInputBorder(),
+                              isDense: true,
                             ),
                             child: Text(
                               "${_invoiceDate.year}-${_invoiceDate.month}-${_invoiceDate.day}",
+                              style: const TextStyle(fontSize: 13),
                             ),
                           ),
                         ),
@@ -869,12 +570,13 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                   TextField(
                     controller: _refNumController,
                     decoration: const InputDecoration(
-                      labelText: 'رقم المرجع',
+                      labelText: 'رقم المرجع (فاتورة المورد)',
                       prefixIcon: Icon(Icons.receipt),
                       border: OutlineInputBorder(),
+                      isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 10),
                   Row(
                     children: [
                       Expanded(
@@ -886,46 +588,49 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                           decoration: InputDecoration(
                             labelText: 'الصنف',
                             prefixIcon: const Icon(Icons.category),
+                            border: const OutlineInputBorder(),
+                            isDense: true,
                             suffixIcon: IconButton(
                               icon: const Icon(Icons.add_box),
                               onPressed: _showAddProductDialog,
                             ),
-                            border: const OutlineInputBorder(),
                           ),
                         ),
                       ),
                       const SizedBox(width: 5),
                       Expanded(
-                        flex: 2,
                         child: TextField(
                           controller: _costPriceController,
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'سعر',
                             border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
                       const SizedBox(width: 5),
                       Expanded(
-                        flex: 2,
                         child: TextField(
                           controller: _qtyController,
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'كمية',
                             border: OutlineInputBorder(),
+                            isDense: true,
                           ),
                         ),
                       ),
                       const SizedBox(width: 5),
-                      ElevatedButton(
+                      IconButton.filled(
                         onPressed: _addToCart,
-                        style: ElevatedButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          backgroundColor: Colors.brown,
+                        icon: const Icon(Icons.add),
+                        style: IconButton.styleFrom(
+                          backgroundColor: accentColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
-                        child: const Icon(Icons.add, color: Colors.white),
                       ),
                     ],
                   ),
@@ -934,13 +639,19 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
             ),
           ),
 
+          // 2. القائمة
           Expanded(
             child: _cart.isEmpty
-                ? const Center(child: Text('السلة فارغة'))
+                ? const Center(
+                    child: Text(
+                      'السلة فارغة',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  )
                 : ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    separatorBuilder: (c, i) => const SizedBox(height: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
                     itemCount: _cart.length,
+                    separatorBuilder: (c, i) => const SizedBox(height: 5),
                     itemBuilder: (c, i) => Card(
                       child: ListTile(
                         title: Text(
@@ -961,7 +672,11 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
+                              icon: const Icon(
+                                Icons.delete,
+                                color: Colors.red,
+                                size: 20,
+                              ),
                               onPressed: () =>
                                   setState(() => _cart.removeAt(i)),
                             ),
@@ -972,9 +687,9 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                   ),
           ),
 
-          // 🆕🆕 الجزء السفلي الجديد (التفاصيل والضريبة) 🆕🆕
+          // 3. الجزء السفلي (التصميم النهائي الموزع + Expanded)
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
               borderRadius: const BorderRadius.vertical(
@@ -982,7 +697,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
+                  color: Colors.black.withOpacity(0.2),
                   blurRadius: 10,
                   offset: const Offset(0, -5),
                 ),
@@ -991,100 +706,230 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 1. زر تفعيل الضريبة
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    const Text(
-                      "تطبيق ضريبة (14%)",
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Switch(
-                      value: _isTaxEnabled,
-                      onChanged: (val) => setState(() => _isTaxEnabled = val),
-                      activeThumbColor: Colors.brown,
-                    ),
-                  ],
-                ),
-                const Divider(),
-
-                // 2. تفاصيل الأرقام
+                // الصف العلوي للتحكم
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      "المجموع الفرعي:",
-                      style: TextStyle(color: Colors.grey),
+                    // 1. الدفع (يمين)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildPaymentTab("كاش", true),
+                          _buildPaymentTab("آجل", false),
+                        ],
+                      ),
                     ),
-                    Text("${_subTotal.toStringAsFixed(2)} ج.م"),
+
+                    const SizedBox(width: 10),
+
+                    // 2. الخصم (وسط) - واخد Expanded عشان يملى المساحة
+                    Expanded(
+                      child: TextField(
+                        controller: _discountController,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                        decoration: InputDecoration(
+                          labelText: 'خصم (ج.م)',
+                          labelStyle: const TextStyle(fontSize: 11),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 8,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onChanged: (val) => setState(() {}),
+                      ),
+                    ),
+
+                    const SizedBox(width: 10),
+
+                    // 3. الضرايب (يسار)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildToggleChip(
+                          "14%",
+                          _isTaxEnabled,
+                          (v) => setState(() => _isTaxEnabled = v),
+                          Colors.orange,
+                        ),
+                        const SizedBox(width: 5),
+                        _buildToggleChip(
+                          "1%",
+                          _isWhtEnabled,
+                          (v) => setState(() => _isWhtEnabled = v),
+                          Colors.red,
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-                if (_isTaxEnabled)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 5),
+
+                const Divider(height: 25),
+
+                // تفاصيل الأرقام
+                Column(
+                  children: [
+                    _buildSummaryLine("المجموع الفرعي", _subTotal),
+                    if (_isTaxEnabled)
+                      _buildSummaryLine(
+                        "Value Added Tax 14% ",
+                        _taxAmount,
+                        color: Colors.orange,
+                      ),
+                    if (_isWhtEnabled)
+                      _buildSummaryLine(
+                        "discount tax  1%  ",
+                        _whtAmount,
+                        color: Colors.orange,
+                      ),
+                    if (_discount > 0)
+                      _buildSummaryLine(
+                        "خصم تجاري (-)",
+                        _discount,
+                        color: Colors.red,
+                      ),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
+                // زر الحفظ العائم (أزرق)
+                GestureDetector(
+                  onTap: _submitPurchase,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 15,
+                    ),
+                    decoration: BoxDecoration(
+                      color: blueColor, // أزرق
+                      borderRadius: BorderRadius.circular(50),
+                      boxShadow: [
+                        BoxShadow(
+                          color: blueColor.withOpacity(0.4),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
-                          "قيمة الضريبة:",
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                        Text(
-                          "+${_taxAmount.toStringAsFixed(2)} ج.م",
-                          style: const TextStyle(
-                            color: Colors.orange,
+                          "حفظ الفاتورة",
+                          style: TextStyle(
+                            color: Colors.white,
                             fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 15,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            "${_grandTotal.toStringAsFixed(2)} ج.م",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
-                const SizedBox(height: 10),
-
-                // 3. الإجمالي النهائي وزر الحفظ
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "الإجمالي النهائي",
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                        Text(
-                          "${_grandTotal.toStringAsFixed(2)} ج.م",
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: accentColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isDark
-                            ? Colors.brown[700]
-                            : Colors.brown[800],
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 25,
-                          vertical: 12,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      onPressed: _submitPurchase,
-                      icon: const Icon(Icons.save, color: Colors.white),
-                      label: const Text(
-                        'حفظ الفاتورة',
-                        style: TextStyle(color: Colors.white, fontSize: 16),
-                      ),
-                    ),
-                  ],
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Widgets مساعدة ---
+  Widget _buildToggleChip(
+    String label,
+    bool value,
+    Function(bool) onChanged,
+    Color color,
+  ) {
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: value ? color : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: value ? color : Colors.grey),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: value ? Colors.white : Colors.grey,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentTab(String label, bool isCashVal) {
+    bool isSelected = _isCashPayment == isCashVal;
+    return GestureDetector(
+      onTap: () => setState(() => _isCashPayment = isCashVal),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (isCashVal ? Colors.green : Colors.red)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.grey,
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryLine(String label, double val, {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+          Text(
+            val.toStringAsFixed(2),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: color,
             ),
           ),
         ],

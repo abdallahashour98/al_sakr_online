@@ -1,5 +1,6 @@
 import 'package:al_sakr/GeneralReportsScreen.dart';
 import 'package:al_sakr/clients_screen.dart';
+import 'package:al_sakr/delivery_orders_screen.dart';
 import 'package:flutter/material.dart';
 import 'sales_screen.dart';
 import 'store_screen.dart';
@@ -89,7 +90,12 @@ class DashboardScreen extends StatelessWidget {
         'color': Colors.brown[600],
         'page': const SuppliersScreen(),
       },
-
+      {
+        'title': 'أذونات التسليم', // تسجيل المصاريف
+        'icon': Icons.receipt_long,
+        'color': Colors.redAccent,
+        'page': const DeliveryOrdersScreen(),
+      },
       {
         'title': 'المصروفات', // تسجيل المصاريف
         'icon': Icons.money_off,

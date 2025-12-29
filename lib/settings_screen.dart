@@ -19,7 +19,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // متغيرات الإصدار
   int _dbVer = 0;
   final String _appVersion =
-      "1.0.1"; // 👈 يفضل تحديثه يدوياً ليتطابق مع pubspec.yaml
+      "1.0.2"; // 👈 يفضل تحديثه يدوياً ليتطابق مع pubspec.yaml
 
   @override
   void initState() {

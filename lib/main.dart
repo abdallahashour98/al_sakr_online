@@ -7,6 +7,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'dart:io';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'backup_service.dart';
+// 👈 ضروري جداً
 
 // متغير التحكم في الثيم
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.system);
@@ -41,7 +42,9 @@ Future<void> main() async {
 
 void scheduleAutoBackup() async {
   final backupService = BackupService();
-
+  // SyncfusionLicense.registerLicense(
+  //   "Ngo9BigBOggjHTQxAR8/V1JBaF5cXGpCf0x1WmFZfVhgfV9GYVZQTWYuP1ZhSXxWd0dhXn9XcHVUT2VeWEd9XEA=",
+  // );
   // 1. هل عملنا باك اب النهاردة بالفعل؟
   bool doneToday = await backupService.isBackupDoneToday();
   if (doneToday) {
