@@ -6,19 +6,22 @@ import 'dart:async';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'dart:io';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite/sqflite.dart'; // تأكد من إضافته
 import 'backup_service.dart';
-// 👈 ضروري جداً
 
-// متغير التحكم في الثيم
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.system);
+
 Future<void> main() async {
-  // تأكد من تهيئة Flutter قبل Sentry
+  // 1. ضمان التهيئة أولاً
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 2. إعداد قاعدة البيانات للديسك توب (Windows/Linux)
   if (Platform.isWindows || Platform.isLinux) {
-    sqfliteFfiInit(); // تهيئة FFI
-    databaseFactory = databaseFactoryFfi; // ضبط المصنع لاستخدام FFI
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
   }
 
+  // 3. إعداد Firebase (ما عدا Linux)
   if (!Platform.isLinux) {
     try {
       await Firebase.initializeApp(
@@ -28,14 +31,12 @@ Future<void> main() async {
       print("Firebase Init Error: $e");
     }
   }
+
+  // 4. تشغيل Sentry والتطبيق
   await SentryFlutter.init((options) {
     options.dsn =
-        'https://4426bbe641559b2c132709beb785383b@o4510569137700864.ingest.us.sentry.io/4510569148252160'; // استبدل هذا بالرابط الخاص بك من موقع Sentry
-
-    // لتتبع أداء التطبيق (اختياري)
+        'https://4426bbe641559b2c132709beb785383b@o4510569137700864.ingest.us.sentry.io/4510569148252160';
     options.tracesSampleRate = 1.0;
-
-    // التقاط صور للشاشة عند حدوث الخطأ (مفيد جداً في حل المشاكل)
     options.attachScreenshot = true;
   }, appRunner: () => runApp(const AccountingApp()));
 }

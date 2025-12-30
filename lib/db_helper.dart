@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -12,7 +13,6 @@ class DatabaseHelper {
   final String _dbName = 'SmartAccountingDB.db';
   final int _dbVersion = 3;
 
-  // Getter للرقم عشان شاشة الإعدادات
   int get currentDbVersion => _dbVersion;
 
   Future<Database> get database async {
@@ -28,194 +28,155 @@ class DatabaseHelper {
     }
 
     final String path = await getDbPath();
+    // print("Database Path: $path");
 
     return await openDatabase(
       path,
       version: _dbVersion,
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
+      onConfigure: _onConfigure, // 👈 تفعيل وضع WAL
+      onCreate: _onCreate, // 👈 الإنشاء الآمن
+      onUpgrade: _onUpgrade, // 👈 التحديث الآمن
       onDowngrade: onDatabaseDowngradeDelete,
     );
   }
 
-  // --- دالة الإنشاء (للمستخدم الجديد) ---
+  // 🔥 تحسين الأداء ومنع القفل (Database Locked)
+  Future _onConfigure(Database db) async {
+    await db.execute('PRAGMA foreign_keys = ON');
+    await db.execute('PRAGMA journal_mode = WAL');
+    await db.execute('PRAGMA synchronous = NORMAL');
+  }
+
+  // 🔥 دالة الإنشاء الآمنة (لن تضرب حتى لو الملف موجود جزئياً)
   Future _onCreate(Database db, int version) async {
     // 1. العملاء
     await db.execute(
-      'CREATE TABLE clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, phone TEXT, address TEXT, balance REAL DEFAULT 0.0)',
+      'CREATE TABLE IF NOT EXISTS clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, phone TEXT, address TEXT, balance REAL DEFAULT 0.0)',
     );
     // 2. الموردين
     await db.execute(
-      'CREATE TABLE suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, name TEXT, contactPerson TEXT, phone TEXT, address TEXT, notes TEXT, balance REAL DEFAULT 0.0)',
+      'CREATE TABLE IF NOT EXISTS suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, name TEXT, contactPerson TEXT, phone TEXT, address TEXT, notes TEXT, balance REAL DEFAULT 0.0)',
     );
     // 3. المنتجات
     await db.execute(
-      'CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, code TEXT, barcode TEXT, category TEXT, unit TEXT, buyPrice REAL, sellPrice REAL, minSellPrice REAL, stock INTEGER, reorderLevel INTEGER, supplierId INTEGER, notes TEXT, expiryDate TEXT, imagePath TEXT)',
+      'CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, code TEXT, barcode TEXT, category TEXT, unit TEXT, buyPrice REAL, sellPrice REAL, minSellPrice REAL, stock INTEGER, reorderLevel INTEGER, supplierId INTEGER, notes TEXT, expiryDate TEXT, imagePath TEXT, damagedStock INTEGER DEFAULT 0)',
     );
     // 4. الوحدات
     await db.execute(
-      'CREATE TABLE units (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)',
+      'CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)',
     );
-    await db.insert('units', {'name': 'قطعة'});
+    // إضافة "قطعة" فقط إذا لم تكن موجودة
+    var checkUnits = await db.rawQuery(
+      "SELECT * FROM units WHERE name = 'قطعة'",
+    );
+    if (checkUnits.isEmpty) {
+      await db.insert('units', {'name': 'قطعة'});
+    }
 
     // 5. المبيعات
     await db.execute(
-      "CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, storedClientName TEXT, totalAmount REAL, taxAmount REAL DEFAULT 0.0, discount REAL DEFAULT 0.0, netAmount REAL DEFAULT 0.0, date TEXT, notes TEXT, referenceNumber TEXT, totalReturned REAL DEFAULT 0.0, paymentType TEXT DEFAULT 'cash')",
+      "CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, storedClientName TEXT, totalAmount REAL, taxAmount REAL DEFAULT 0.0, discount REAL DEFAULT 0.0, netAmount REAL DEFAULT 0.0, date TEXT, notes TEXT, referenceNumber TEXT, totalReturned REAL DEFAULT 0.0, paymentType TEXT DEFAULT 'cash', whtAmount REAL DEFAULT 0.0)",
     );
     await db.execute(
-      'CREATE TABLE sale_items (id INTEGER PRIMARY KEY AUTOINCREMENT, saleId INTEGER, productId INTEGER, productName TEXT, quantity INTEGER, price REAL)',
+      'CREATE TABLE IF NOT EXISTS sale_items (id INTEGER PRIMARY KEY AUTOINCREMENT, saleId INTEGER, productId INTEGER, productName TEXT, quantity INTEGER, price REAL)',
     );
 
     // 6. المرتجعات (عملاء)
     await db.execute(
-      'CREATE TABLE returns (id INTEGER PRIMARY KEY AUTOINCREMENT, saleId INTEGER, clientId INTEGER, totalAmount REAL, discount REAL DEFAULT 0.0, paidAmount REAL DEFAULT 0.0, date TEXT, notes TEXT)',
+      'CREATE TABLE IF NOT EXISTS returns (id INTEGER PRIMARY KEY AUTOINCREMENT, saleId INTEGER, clientId INTEGER, totalAmount REAL, discount REAL DEFAULT 0.0, paidAmount REAL DEFAULT 0.0, date TEXT, notes TEXT)',
     );
     await db.execute(
-      'CREATE TABLE return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
-    );
-    await db.execute(
-      'CREATE TABLE delivery_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, clientName TEXT, supplyOrderNumber TEXT, manualNo TEXT, deliveryDate TEXT, address TEXT, notes TEXT)',
-    );
-    await db.execute(
-      'CREATE TABLE delivery_items (id INTEGER PRIMARY KEY AUTOINCREMENT, orderId INTEGER, productName TEXT, quantity INTEGER, description TEXT)',
-    );
-    // 7. المشتريات (مع عمود ضريبة الخصم whtAmount)
-    await db.execute(
-      'CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, totalAmount REAL, taxAmount REAL DEFAULT 0.0, whtAmount REAL DEFAULT 0.0, date TEXT, notes TEXT, referenceNumber TEXT)',
-    );
-    await db.execute(
-      'CREATE TABLE purchase_items (id INTEGER PRIMARY KEY AUTOINCREMENT, invoiceId INTEGER, productId INTEGER, quantity INTEGER, costPrice REAL)',
+      'CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
     );
 
-    // 8. جداول مالية
+    // 7. أذونات التسليم (النسخة الصحيحة والوحيدة)
     await db.execute(
-      'CREATE TABLE opening_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT)',
+      'CREATE TABLE IF NOT EXISTS delivery_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, clientName TEXT, supplyOrderNumber TEXT, manualNo TEXT, deliveryDate TEXT, address TEXT, notes TEXT, isLocked INTEGER DEFAULT 0, signedImagePath TEXT)',
     );
     await db.execute(
-      'CREATE TABLE receipts (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT)',
-    );
-    await db.execute(
-      'CREATE TABLE supplier_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, amount REAL, date TEXT, notes TEXT)',
-    );
-    await db.execute(
-      'CREATE TABLE client_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT, type TEXT)',
-    );
-    await db.execute(
-      'CREATE TABLE expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, amount REAL, date TEXT, category TEXT, notes TEXT)',
+      'CREATE TABLE IF NOT EXISTS delivery_items (id INTEGER PRIMARY KEY AUTOINCREMENT, orderId INTEGER, productName TEXT, quantity INTEGER, description TEXT, relatedSupplyOrder TEXT)',
     );
 
-    // 9. الجداول الإضافية
+    // 8. المشتريات
     await db.execute(
-      'CREATE TABLE supplier_opening_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, amount REAL, date TEXT, notes TEXT)',
+      'CREATE TABLE IF NOT EXISTS purchase_invoices (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, totalAmount REAL, taxAmount REAL DEFAULT 0.0, whtAmount REAL DEFAULT 0.0, date TEXT, notes TEXT, referenceNumber TEXT)',
     );
     await db.execute(
-      'CREATE TABLE purchase_returns (id INTEGER PRIMARY KEY AUTOINCREMENT, invoiceId INTEGER, supplierId INTEGER, totalAmount REAL, date TEXT, notes TEXT)',
+      'CREATE TABLE IF NOT EXISTS purchase_items (id INTEGER PRIMARY KEY AUTOINCREMENT, invoiceId INTEGER, productId INTEGER, quantity INTEGER, costPrice REAL)',
+    );
+
+    // 9. جداول مالية
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS opening_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT)',
     );
     await db.execute(
-      'CREATE TABLE purchase_return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
+      'CREATE TABLE IF NOT EXISTS receipts (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT)',
     );
     await db.execute(
-      'CREATE TABLE delivery_items (id INTEGER PRIMARY KEY AUTOINCREMENT, orderId INTEGER, productName TEXT, quantity INTEGER, description TEXT, relatedSupplyOrder TEXT)',
+      'CREATE TABLE IF NOT EXISTS supplier_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, amount REAL, date TEXT, notes TEXT)',
+    );
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS client_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT, type TEXT)',
+    );
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, amount REAL, date TEXT, category TEXT, notes TEXT)',
+    );
+
+    // 10. الجداول الإضافية
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS supplier_opening_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, amount REAL, date TEXT, notes TEXT)',
+    );
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS purchase_returns (id INTEGER PRIMARY KEY AUTOINCREMENT, invoiceId INTEGER, supplierId INTEGER, totalAmount REAL, date TEXT, notes TEXT)',
+    );
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS purchase_return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
     );
   }
 
-  // --- 🔥 دالة الترقية (للمستخدم القديم) 🔥 ---
+  // --- دالة الترقية الآمنة ---
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 3) {
-      // الجداول المفقودة عند التحديث
-      await db.execute(
-        'CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, amount REAL, date TEXT, category TEXT, notes TEXT)',
-      );
-      await db.execute(
-        'CREATE TABLE IF NOT EXISTS client_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT, type TEXT)',
-      );
-      await db.execute(
-        'CREATE TABLE IF NOT EXISTS supplier_opening_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, amount REAL, date TEXT, notes TEXT)',
-      );
-      await db.execute(
-        'CREATE TABLE IF NOT EXISTS purchase_returns (id INTEGER PRIMARY KEY AUTOINCREMENT, invoiceId INTEGER, supplierId INTEGER, totalAmount REAL, date TEXT, notes TEXT)',
-      );
-      await db.execute(
-        'CREATE TABLE IF NOT EXISTS purchase_return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
-      );
-      // داخل دالة _onUpgrade (في الجزء الخاص بـ oldVersion < 3 أو ضيفها في الآخر)
-      await db.execute(
-        'CREATE TABLE IF NOT EXISTS delivery_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, clientName TEXT, supplyOrderNumber TEXT, deliveryDate TEXT, address TEXT, notes TEXT)',
-      );
-      await db.execute(
-        'CREATE TABLE IF NOT EXISTS delivery_items (id INTEGER PRIMARY KEY AUTOINCREMENT, orderId INTEGER, productName TEXT, quantity INTEGER, description TEXT)',
-      );
+    // قائمة الأوامر التي قد تفشل إذا كانت موجودة مسبقاً
+    List<String> updates = [
+      'CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, amount REAL, date TEXT, category TEXT, notes TEXT)',
+      'CREATE TABLE IF NOT EXISTS client_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, clientId INTEGER, amount REAL, date TEXT, notes TEXT, type TEXT)',
+      'CREATE TABLE IF NOT EXISTS supplier_opening_balances (id INTEGER PRIMARY KEY AUTOINCREMENT, supplierId INTEGER, amount REAL, date TEXT, notes TEXT)',
+      'CREATE TABLE IF NOT EXISTS purchase_returns (id INTEGER PRIMARY KEY AUTOINCREMENT, invoiceId INTEGER, supplierId INTEGER, totalAmount REAL, date TEXT, notes TEXT)',
+      'CREATE TABLE IF NOT EXISTS purchase_return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, returnId INTEGER, productId INTEGER, quantity INTEGER, price REAL)',
+      'CREATE TABLE IF NOT EXISTS delivery_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, clientName TEXT, supplyOrderNumber TEXT, manualNo TEXT, deliveryDate TEXT, address TEXT, notes TEXT, isLocked INTEGER DEFAULT 0, signedImagePath TEXT)',
+      'CREATE TABLE IF NOT EXISTS delivery_items (id INTEGER PRIMARY KEY AUTOINCREMENT, orderId INTEGER, productName TEXT, quantity INTEGER, description TEXT, relatedSupplyOrder TEXT)',
 
-      // إضافة الأعمدة الناقصة بأمان (try-catch)
-      var columnsToAdd = [
-        'ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0.0',
-        'ALTER TABLE sales ADD COLUMN taxAmount REAL DEFAULT 0.0',
-        'ALTER TABLE sales ADD COLUMN netAmount REAL DEFAULT 0.0',
-        'ALTER TABLE sales ADD COLUMN totalReturned REAL DEFAULT 0.0',
-        "ALTER TABLE sales ADD COLUMN paymentType TEXT DEFAULT 'cash'",
-        'ALTER TABLE products ADD COLUMN expiryDate TEXT',
-        'ALTER TABLE products ADD COLUMN imagePath TEXT',
-        'ALTER TABLE sale_items ADD COLUMN productName TEXT',
-        'ALTER TABLE returns ADD COLUMN paidAmount REAL DEFAULT 0.0',
-        'ALTER TABLE returns ADD COLUMN discount REAL DEFAULT 0.0',
-        'ALTER TABLE purchase_invoices ADD COLUMN taxAmount REAL DEFAULT 0.0',
-        // 🔥 العمود الجديد لضريبة الخصم
-        'ALTER TABLE purchase_invoices ADD COLUMN whtAmount REAL DEFAULT 0.0',
-        'ALTER TABLE sales ADD COLUMN whtAmount REAL DEFAULT 0.0',
-        'ALTER TABLE delivery_orders ADD COLUMN manualNo TEXT', //
-      ];
+      'ALTER TABLE sales ADD COLUMN discount REAL DEFAULT 0.0',
+      'ALTER TABLE sales ADD COLUMN taxAmount REAL DEFAULT 0.0',
+      'ALTER TABLE sales ADD COLUMN netAmount REAL DEFAULT 0.0',
+      'ALTER TABLE sales ADD COLUMN totalReturned REAL DEFAULT 0.0',
+      "ALTER TABLE sales ADD COLUMN paymentType TEXT DEFAULT 'cash'",
+      'ALTER TABLE sales ADD COLUMN whtAmount REAL DEFAULT 0.0',
 
-      for (var query in columnsToAdd) {
-        try {
-          await db.execute(query);
-        } catch (_) {}
-      }
+      'ALTER TABLE products ADD COLUMN expiryDate TEXT',
+      'ALTER TABLE products ADD COLUMN imagePath TEXT',
+      "ALTER TABLE products ADD COLUMN damagedStock INTEGER DEFAULT 0",
 
-      // تحديث البيانات القديمة
+      'ALTER TABLE sale_items ADD COLUMN productName TEXT',
+
+      'ALTER TABLE returns ADD COLUMN paidAmount REAL DEFAULT 0.0',
+      'ALTER TABLE returns ADD COLUMN discount REAL DEFAULT 0.0',
+
+      'ALTER TABLE purchase_invoices ADD COLUMN taxAmount REAL DEFAULT 0.0',
+      'ALTER TABLE purchase_invoices ADD COLUMN whtAmount REAL DEFAULT 0.0',
+
+      'ALTER TABLE delivery_orders ADD COLUMN manualNo TEXT',
+      'ALTER TABLE delivery_orders ADD COLUMN isLocked INTEGER DEFAULT 0',
+      'ALTER TABLE delivery_orders ADD COLUMN signedImagePath TEXT',
+
+      'ALTER TABLE delivery_items ADD COLUMN relatedSupplyOrder TEXT',
+    ];
+
+    for (var query in updates) {
       try {
-        await db.execute(
-          'UPDATE sales SET netAmount = totalAmount WHERE netAmount = 0 OR netAmount IS NULL',
-        );
-      } catch (_) {}
-      try {
-        await db.execute(
-          'ALTER TABLE delivery_orders ADD COLUMN manualNo TEXT',
-        );
-        print("Column manualNo added successfully");
+        await db.execute(query);
       } catch (e) {
-        print("Error adding column: $e");
-      }
-      try {
-        // إضافة عمود أمر التوريد الفرعي للأصناف
-        await db.execute(
-          'ALTER TABLE delivery_items ADD COLUMN relatedSupplyOrder TEXT',
-        );
-        print("Column relatedSupplyOrder added successfully");
-      } catch (e) {
-        print("Error adding relatedSupplyOrder column: $e");
-      }
-      try {
-        // إضافة عمود القفل (0 = مفتوح، 1 = مقفول)
-        await db.execute(
-          'ALTER TABLE delivery_orders ADD COLUMN isLocked INTEGER DEFAULT 0',
-        );
-        print("Column isLocked added successfully");
-      } catch (e) {
-        print("Error adding isLocked column: $e");
-      }
-      try {
-        await db.execute(
-          'ALTER TABLE delivery_orders ADD COLUMN signedImagePath TEXT',
-        );
-        print("Column signedImagePath added");
-      } catch (_) {}
-      try {
-        await db.execute(
-          "ALTER TABLE products ADD COLUMN damagedStock INTEGER DEFAULT 0",
-        );
-        print("Column damagedStock added successfully");
-      } catch (e) {
-        print("Error adding damagedStock: $e");
+        // نتجاهل الخطأ لأن العمود غالباً موجود بالفعل
       }
     }
   }
@@ -578,7 +539,7 @@ class DatabaseHelper {
         'totalAmount': totalAmount,
         'discount': discount,
         'taxAmount': taxAmount,
-        'whtAmount': whtAmount, // حفظ القيمة
+        'whtAmount': whtAmount,
         'netAmount': netAmount,
         'referenceNumber': refNumber,
         'paymentType': isCash ? 'cash' : 'credit',
@@ -766,7 +727,7 @@ class DatabaseHelper {
     });
   }
 
-  // 🔥 دالة المشتريات المحدثة (تدعم 1% WHT والمتوسط المرجح) 🔥
+  // 🔥 دالة المشتريات
   Future<void> createPurchase(
     int supplierId,
     double totalAmount,
@@ -1224,26 +1185,25 @@ class DatabaseHelper {
   Future<String> getDbPath() async {
     Directory dir;
     if (Platform.isWindows || Platform.isLinux) {
-      dir = await getApplicationDocumentsDirectory();
-      dir = Directory(join(dir.path, 'AlSakr_Data'));
+      dir = await getApplicationSupportDirectory(); // استخدام المجلد الآمن
     } else {
       dir = await getApplicationDocumentsDirectory();
     }
 
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
+    final dbFolder = Directory(join(dir.path, 'AlSakr_Data'));
+    if (!await dbFolder.exists()) {
+      await dbFolder.create(recursive: true);
     }
 
-    return join(dir.path, _dbName);
+    return join(dbFolder.path, _dbName);
   }
+
   // ==================== أذونات التسليم (Delivery Orders) ====================
 
-  // إنشاء إذن جديد
-  // إنشاء إذن جديد (محدث)
   Future<void> createDeliveryOrder(
     String clientName,
     String supplyOrderNumber,
-    String manualNo, // 👈 معامل جديد
+    String manualNo,
     String address,
     String date,
     String notes,
@@ -1255,7 +1215,7 @@ class DatabaseHelper {
       int orderId = await txn.insert('delivery_orders', {
         'clientName': clientName,
         'supplyOrderNumber': supplyOrderNumber,
-        'manualNo': manualNo, // 👈 تخزين الرقم
+        'manualNo': manualNo,
         'deliveryDate': date,
         'address': address,
         'notes': notes,
@@ -1274,16 +1234,11 @@ class DatabaseHelper {
     });
   }
 
-  // جلب كل الأذونات (للعرض والبحث)
   Future<List<Map<String, dynamic>>> getAllDeliveryOrders() async {
     Database db = await database;
-    return await db.query(
-      'delivery_orders',
-      orderBy: "id DESC",
-    ); // الأحدث أولاً
+    return await db.query('delivery_orders', orderBy: "id DESC");
   }
 
-  // جلب أصناف إذن معين (للتفاصيل)
   Future<List<Map<String, dynamic>>> getDeliveryOrderItems(int orderId) async {
     Database db = await database;
     return await db.query(
@@ -1293,7 +1248,6 @@ class DatabaseHelper {
     );
   }
 
-  // حذف إذن
   Future<void> deleteDeliveryOrder(int id) async {
     Database db = await database;
     await db.transaction((txn) async {
@@ -1302,7 +1256,6 @@ class DatabaseHelper {
     });
   }
 
-  // 1. دالة تحديث الإذن بالكامل (للتعديل)
   Future<void> updateDeliveryOrder(
     int orderId,
     String clientName,
@@ -1315,7 +1268,6 @@ class DatabaseHelper {
   ) async {
     Database db = await database;
     await db.transaction((txn) async {
-      // أ. تحديث البيانات الأساسية
       await txn.update(
         'delivery_orders',
         {
@@ -1330,14 +1282,12 @@ class DatabaseHelper {
         whereArgs: [orderId],
       );
 
-      // ب. حذف الأصناف القديمة بالكامل
       await txn.delete(
         'delivery_items',
         where: 'orderId = ?',
         whereArgs: [orderId],
       );
 
-      // ج. إدراج الأصناف الجديدة (نفس كود الإضافة)
       for (var item in newItems) {
         await txn.insert('delivery_items', {
           'orderId': orderId,
@@ -1350,7 +1300,6 @@ class DatabaseHelper {
     });
   }
 
-  // 2. دالة قفل/فتح الإذن
   Future<void> toggleOrderLock(
     int orderId,
     bool isLocked, {
@@ -1359,7 +1308,6 @@ class DatabaseHelper {
     Database db = await database;
     Map<String, dynamic> values = {'isLocked': isLocked ? 1 : 0};
 
-    // لو فيه صورة جاية، احفظها. لو مفيش (أو بنفتح القفل) ممكن نسيب القديمة أو نعدلها حسب الرغبة
     if (imagePath != null) {
       values['signedImagePath'] = imagePath;
     }
@@ -1372,12 +1320,11 @@ class DatabaseHelper {
     );
   }
 
-  // دالة لتحديث مسار الصورة فقط (لتغييرها أو حذفها)
   Future<void> updateOrderImage(int orderId, String? imagePath) async {
     Database db = await database;
     await db.update(
       'delivery_orders',
-      {'signedImagePath': imagePath}, // لو null هيمسحها
+      {'signedImagePath': imagePath},
       where: 'id = ?',
       whereArgs: [orderId],
     );
