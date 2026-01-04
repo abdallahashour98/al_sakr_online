@@ -1,10 +1,9 @@
-import 'dart:io'; // 🆕 ضروري عشان نعرف إحنا على لينكس ولا ويندوز
 import 'package:flutter/material.dart';
 import 'excel_service.dart';
-import 'backup_service.dart';
-import 'update_service.dart'; // 🆕 استدعاء كلاس التحديث
-import 'db_helper.dart';
+import 'pb_helper.dart';
 import 'main.dart';
+import 'users_screen.dart';
+import 'login_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -15,79 +14,117 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLoading = false;
+  final String _appVersion = "2.0.0 (Online)";
 
-  // متغيرات الإصدار
-  int _dbVer = 0;
-  final String _appVersion =
-      "1.0.2"; // 👈 يفضل تحديثه يدوياً ليتطابق مع pubspec.yaml
+  // الكونترولرز (موجودين عشان يحافظوا على الداتا حتى لو مش ظاهرين)
+  final TextEditingController _companyNameController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _mobileController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _websiteController = TextEditingController();
+  final TextEditingController _taxNumberController = TextEditingController();
+
+  // متغيرات الصلاحيات
+  bool _isSuperAdmin = false;
+  bool _canEditCompanySettings = false;
+  bool _canBackupData = false;
+  bool _canManageUsers = false;
+
+  final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
-    _getDbVersion();
+    _checkPermission();
+    _loadCompanyData();
   }
 
-  void _getDbVersion() {
-    setState(() {
-      _dbVer = DatabaseHelper().currentDbVersion;
+  void _checkPermission() {
+    final user = PBHelper().pb.authStore.record;
+    if (user != null) {
+      final myId = user.id;
+      final data = user.data;
+
+      setState(() {
+        _isSuperAdmin = (myId == _superAdminId);
+        _canEditCompanySettings =
+            _isSuperAdmin || (data['allow_edit_settings'] ?? false);
+        _canBackupData = _isSuperAdmin || (data['allow_backup_data'] ?? false);
+        _canManageUsers =
+            _isSuperAdmin || (data['allow_manage_permissions'] ?? false);
+      });
+    }
+  }
+
+  // تحميل البيانات من الداتا بيز
+  void _loadCompanyData() async {
+    setState(() => _isLoading = true);
+    final data = await PBHelper().getCompanySettings();
+    if (data.isNotEmpty) {
+      _companyNameController.text = data['companyName'] ?? '';
+      _addressController.text = data['address'] ?? '';
+      _phoneController.text = data['phone'] ?? '';
+      _mobileController.text = data['mobile'] ?? '';
+      _emailController.text = data['email'] ?? '';
+      _websiteController.text = data['website'] ?? '';
+      _taxNumberController.text = data['taxNumber'] ?? '';
+    }
+    if (mounted) setState(() => _isLoading = false);
+  }
+
+  Future<void> _saveCompanyData() async {
+    await _performAction(() async {
+      await PBHelper().saveCompanySettings({
+        'companyName':
+            _companyNameController.text, // بيتحفظ زي ما هو من الداتا بيز
+        'address': _addressController.text,
+        'phone': _phoneController.text,
+        'mobile': _mobileController.text,
+        'email': _emailController.text,
+        'website': _websiteController.text,
+        'taxNumber': _taxNumberController.text, // بيتحفظ زي ما هو
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم حفظ بيانات الشركة بنجاح ✅'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     });
   }
 
   Future<void> _performAction(Future<void> Function() action) async {
     if (_isLoading) return;
-
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
       await action();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('حدث خطأ: $e'), backgroundColor: Colors.red),
-        );
-      }
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('خطأ: $e')));
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white70 : Colors.grey[800];
-
     return Stack(
       children: [
         Scaffold(
-          appBar: AppBar(
-            title: const Text(
-              'الإعدادات والبيانات',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            centerTitle: true,
-            elevation: 0,
-          ),
+          appBar: AppBar(title: const Text('الإعدادات')),
           body: Padding(
             padding: const EdgeInsets.all(20.0),
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- قسم المظهر ---
-                  const Text(
-                    'المظهر',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey,
-                    ),
-                  ),
+                  // 1. المظهر واللغة
+                  _buildSectionTitle('المظهر', Icons.palette, Colors.blueGrey),
                   const SizedBox(height: 10),
                   Card(
                     elevation: 2,
@@ -121,9 +158,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   child: Text('داكن (Dark Mode)'),
                                 ),
                               ],
-                              onChanged: (ThemeMode? newMode) {
+                              onChanged: (ThemeMode? newMode) async {
                                 if (newMode != null) {
                                   themeNotifier.value = newMode;
+                                  await PBHelper().saveThemeMode(newMode);
+                                }
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+                  _buildSectionTitle(
+                    'اللغة / Language',
+                    Icons.language,
+                    Colors.purple,
+                  ),
+                  const SizedBox(height: 10),
+                  Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 15,
+                        vertical: 5,
+                      ),
+                      child: ValueListenableBuilder<Locale>(
+                        valueListenable: localeNotifier,
+                        builder: (context, currentLocale, child) {
+                          return DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: currentLocale.languageCode,
+                              isExpanded: true,
+                              icon: const Icon(Icons.translate),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'ar',
+                                  child: Text('العربية (RTL)'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'en',
+                                  child: Text('English (LTR)'),
+                                ),
+                              ],
+                              onChanged: (String? newLang) async {
+                                if (newLang != null) {
+                                  localeNotifier.value = Locale(newLang);
+                                  await PBHelper().saveLocale(newLang);
                                 }
                               },
                             ),
@@ -137,175 +223,146 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const Divider(),
                   const SizedBox(height: 20),
 
-                  // --- قسم قاعدة البيانات (النسخ الاحتياطي الشامل) ---
-                  const Text(
-                    'النسخ الاحتياطي (بيانات + صور)',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
+                  // 2. بيانات الشركة
+                  if (_canEditCompanySettings) ...[
+                    _buildSectionTitle(
+                      'بيانات الشركة ',
+                      Icons.business,
+                      Colors.orange,
                     ),
-                  ),
-                  const SizedBox(height: 15),
-                  Row(
-                    children: [
-                      // زر التصدير (ZIP)
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isLoading
-                                ? Colors.grey
-                                : Colors.blue[700],
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          onPressed: _isLoading
-                              ? null
-                              : () async {
-                                  await _performAction(() async {
-                                    await BackupService().exportBackup(context);
-                                  });
-                                },
-                          icon: const Icon(Icons.archive),
-                          label: const Text('تصدير نسخة (ZIP)'),
-                        ),
+                    const SizedBox(height: 10),
+                    Card(
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      const SizedBox(width: 15),
+                      child: ExpansionTile(
+                        leading: const Icon(
+                          Icons.edit_note,
+                          color: Colors.orange,
+                        ),
+                        title: const Text(
+                          'تعديل بيانات الشركة',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(15.0),
+                            child: Column(
+                              children: [
+                                // ❌❌ تم إخفاء اسم الشركة والرقم الضريبي من هنا
+                                TextField(
+                                  controller: _addressController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'العنوان التفصيلي',
+                                    prefixIcon: Icon(Icons.location_on),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _emailController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'البريد الإلكتروني',
+                                    prefixIcon: Icon(Icons.email),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _websiteController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'الموقع الإلكتروني',
+                                    prefixIcon: Icon(Icons.language),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
 
-                      // زر الاستعادة (ZIP)
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isLoading
-                                ? Colors.grey
-                                : Colors.orange[800],
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          onPressed: _isLoading
-                              ? null
-                              : () {
-                                  showDialog(
-                                    context: context,
-                                    barrierDismissible: false,
-                                    builder: (ctx) => AlertDialog(
-                                      title: const Text('تنبيه هام'),
-                                      content: const Text(
-                                        'أنت على وشك استعادة نسخة قديمة.\n\n'
-                                        '⚠️ سيتم مسح جميع البيانات الحالية واستبدالها ببيانات النسخة الاحتياطية.\n\n'
-                                        'أي فواتير أو أصناف أضيفت بعد تاريخ هذه النسخة سوف تُحذف نهائياً.',
-                                        style: TextStyle(height: 1.5),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _phoneController,
+                                        keyboardType: TextInputType.phone,
+                                        decoration: const InputDecoration(
+                                          labelText: 'TeleFax',
+                                          prefixIcon: Icon(Icons.phone),
+                                        ),
                                       ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () => Navigator.pop(ctx),
-                                          child: const Text('إلغاء'),
-                                        ),
-                                        TextButton(
-                                          onPressed: () async {
-                                            Navigator.pop(ctx);
-                                            await _performAction(() async {
-                                              await BackupService()
-                                                  .importBackup(context);
-                                            });
-                                          },
-                                          child: const Text(
-                                            'نعم، استعادة',
-                                            style: TextStyle(
-                                              color: Colors.orange,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
                                     ),
-                                  );
-                                },
-                          icon: const Icon(Icons.unarchive),
-                          label: const Text('استعادة نسخة'),
-                        ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _mobileController,
+                                        keyboardType: TextInputType.phone,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Mobile',
+                                          prefixIcon: Icon(Icons.smartphone),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange[800],
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    onPressed: _saveCompanyData,
+                                    icon: const Icon(Icons.save),
+                                    label: const Text('حفظ التعديلات'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 30),
-                  const Divider(),
-                  const SizedBox(height: 20),
-
-                  // --- قسم الإكسيل ---
-                  const Text(
-                    'التعامل مع Excel',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
                     ),
-                  ),
-                  const SizedBox(height: 15),
+                    const SizedBox(height: 30),
+                  ],
 
-                  // زر التصدير للإكسيل
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isLoading
-                            ? Colors.grey
-                            : Colors.green[600],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      onPressed: _isLoading
-                          ? null
-                          : () async {
+                  // 3. النسخ الاحتياطي
+                  if (_canBackupData) ...[
+                    _buildSectionTitle(
+                      'التعامل مع Excel (Backup)',
+                      Icons.table_chart,
+                      Colors.green,
+                    ),
+                    const SizedBox(height: 15),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildActionButton(
+                            label: 'تصدير (Backup)',
+                            icon: Icons.download,
+                            color: Colors.green[700]!,
+                            onTap: () async {
                               await _performAction(() async {
                                 await ExcelService().exportFullBackup();
-                                if (mounted) {
+                                if (mounted)
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text(
-                                        'تم تصدير ملف الإكسيل بنجاح',
-                                      ),
+                                      content: Text('تم التصدير بنجاح'),
                                       backgroundColor: Colors.green,
                                     ),
                                   );
-                                }
                               });
                             },
-                      icon: const Icon(Icons.download),
-                      label: const Text('تصدير البيانات للإكسيل'),
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-
-                  // زر الاستيراد من إكسيل
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isLoading
-                            ? Colors.grey
-                            : Colors.green[900],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
-                      ),
-                      onPressed: _isLoading
-                          ? null
-                          : () async {
+                        const SizedBox(width: 15),
+                        Expanded(
+                          child: _buildActionButton(
+                            label: 'استيراد (Restore)',
+                            icon: Icons.upload_file,
+                            color: Colors.green[900]!,
+                            onTap: () async {
                               await _performAction(() async {
                                 String res = await ExcelService()
                                     .importFullBackup();
-                                if (mounted) {
+                                if (mounted)
                                   showDialog(
                                     context: context,
                                     builder: (ctx) => AlertDialog(
@@ -321,80 +378,105 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       ],
                                     ),
                                   );
-                                }
                               });
                             },
-                      icon: const Icon(Icons.upload_file),
-                      label: const Text('استيراد أصناف من إكسيل'),
-                    ),
-                  ),
-
-                  const SizedBox(height: 30),
-                  const Divider(),
-                  const SizedBox(height: 20),
-
-                  // --- 🆕 قسم تحديث النظام ---
-                  const Text(
-                    'تحديث النظام',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue,
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isLoading
-                            ? Colors.grey
-                            : Colors.blue[800],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
-                      ),
-                      onPressed: _isLoading
-                          ? null
-                          : () async {
-                              // التحقق من النظام لتجنب الكراش على لينكس
-                              if (Platform.isLinux) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'التحديث التلقائي غير مدعوم على نسخة اللينكس التجريبية',
-                                    ),
-                                  ),
-                                );
-                                return;
-                              }
+                      ],
+                    ),
+                    const SizedBox(height: 30),
+                    const Divider(),
+                    const SizedBox(height: 20),
+                  ],
 
-                              await _performAction(() async {
-                                // استدعاء دالة التحقق من التحديث
-                                await UpdateService().checkForUpdate(context);
-                              });
-                            },
-                      icon: const Icon(Icons.system_update),
-                      label: const Text('التحقق من وجود تحديثات'),
+                  // 4. الحساب والأمان
+                  _buildSectionTitle(
+                    'الحساب والأمان',
+                    Icons.security,
+                    Colors.redAccent,
+                  ),
+                  const SizedBox(height: 10),
+                  Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      children: [
+                        if (_canManageUsers) ...[
+                          ListTile(
+                            leading: const Icon(
+                              Icons.manage_accounts,
+                              color: Colors.blueGrey,
+                            ),
+                            title: const Text("إدارة المستخدمين والصلاحيات"),
+                            trailing: const Icon(
+                              Icons.arrow_forward_ios,
+                              size: 16,
+                            ),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const UsersScreen(),
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                        ],
+                        ListTile(
+                          leading: const Icon(Icons.logout, color: Colors.red),
+                          title: const Text(
+                            "تسجيل خروج",
+                            style: TextStyle(
+                              color: Colors.red,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          onTap: () {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text("تأكيد"),
+                                content: const Text("هل تريد تسجيل الخروج؟"),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: const Text("إلغاء"),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    onPressed: () {
+                                      PBHelper().logout();
+                                      Navigator.pop(ctx);
+                                      Navigator.pushAndRemoveUntil(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const LoginScreen(),
+                                        ),
+                                        (route) => false,
+                                      );
+                                    },
+                                    child: const Text("خروج"),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ),
 
                   const SizedBox(height: 40),
-
-                  // --- الفوتر (يحتوي على الإصدارات) ---
                   Center(
                     child: Column(
                       children: [
                         const Text(
                           'Developed by',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontFamily: 'Roboto',
-                            color: Colors.grey,
-                          ),
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
                         ),
                         const SizedBox(height: 5),
                         const Text(
@@ -404,32 +486,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             fontWeight: FontWeight.bold,
                             color: Colors.red,
                             letterSpacing: 1.5,
-                            fontFamily: 'Roboto',
                           ),
                         ),
                         const SizedBox(height: 10),
-
-                        // مستطيل عرض الإصدارات
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 6,
                           ),
                           decoration: BoxDecoration(
-                            color: isDark ? Colors.grey[800] : Colors.grey[200],
+                            color: Colors.grey[200],
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
-                            'App Version: $_appVersion  |  DB Version: $_dbVer',
+                            'Version: $_appVersion',
                             style: TextStyle(
-                              color: textColor,
+                              color: Colors.grey[800],
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
                               fontFamily: 'monospace',
                             ),
                           ),
                         ),
-                        const SizedBox(height: 10),
                       ],
                     ),
                   ),
@@ -438,16 +516,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ),
-
-        // طبقة التحميل
         if (_isLoading)
           Container(
-            color: Colors.black.withOpacity(0.5),
+            color: Colors.black54,
             child: const Center(
               child: CircularProgressIndicator(color: Colors.white),
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildSectionTitle(String title, IconData icon, Color color) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      onPressed: onTap,
+      icon: Icon(icon),
+      label: Text(label),
     );
   }
 }

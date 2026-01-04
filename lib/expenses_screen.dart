@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // 👈 مهم عشان نتحكم في إدخال الأرقام
-import 'db_helper.dart';
+import 'package:flutter/services.dart';
+import 'pb_helper.dart';
 
 class ExpensesScreen extends StatefulWidget {
   const ExpensesScreen({super.key});
@@ -13,6 +13,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   List<Map<String, dynamic>> _expenses = [];
   bool _isLoading = true;
   double _totalExpenses = 0.0;
+
+  // ✅ 1. متغيرات الصلاحيات
+  bool _canAdd = false;
+  bool _canDelete = false;
+  final String _superAdminId = "1sxo74splxbw1yh";
 
   // القائمة قابلة للتعديل
   List<String> _categories = [
@@ -31,20 +36,51 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   @override
   void initState() {
     super.initState();
+    _loadPermissions(); // تحميل الصلاحيات
     _loadExpenses();
   }
 
+  // ✅ 2. دالة تحميل الصلاحيات
+  Future<void> _loadPermissions() async {
+    final myId = PBHelper().pb.authStore.record?.id;
+    if (myId == null) return;
+
+    if (myId == _superAdminId) {
+      if (mounted)
+        setState(() {
+          _canAdd = true;
+          _canDelete = true;
+        });
+      return;
+    }
+
+    try {
+      final userRecord = await PBHelper().pb.collection('users').getOne(myId);
+      if (mounted) {
+        setState(() {
+          _canAdd = userRecord.data['allow_add_expenses'] ?? false;
+          _canDelete = userRecord.data['allow_delete_expenses'] ?? false;
+        });
+      }
+    } catch (e) {
+      //
+    }
+  }
+
   void _loadExpenses() async {
-    final data = await DatabaseHelper().getExpenses();
+    setState(() => _isLoading = true);
+    final data = await PBHelper().getExpenses();
     double total = 0;
     for (var item in data) {
       total += (item['amount'] as num).toDouble();
     }
-    setState(() {
-      _expenses = data;
-      _totalExpenses = total;
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _expenses = data;
+        _totalExpenses = total;
+        _isLoading = false;
+      });
+    }
   }
 
   IconData _getCategoryIcon(String category) {
@@ -73,6 +109,14 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   void _showManageCategoriesDialog(StateSetter updateParentState) {
+    // حماية: إدارة التصنيفات تعتبر جزء من الإضافة
+    if (!_canAdd) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('ليس لديك صلاحية التعديل')));
+      return;
+    }
+
     final newCategoryController = TextEditingController();
     showDialog(
       context: context,
@@ -153,11 +197,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
-  // 🆕 دالة موحدة للإضافة والتعديل
-  // لو بعتنا expenseToEdit يبقى تعديل، لو null يبقى إضافة
   void _showExpenseDialog({Map<String, dynamic>? expenseToEdit}) {
-    final isEditing = expenseToEdit != null;
+    // حماية
+    if (expenseToEdit == null && !_canAdd) return;
+    if (expenseToEdit != null && !_canAdd) return;
 
+    final isEditing = expenseToEdit != null;
     final titleController = TextEditingController(
       text: isEditing ? expenseToEdit['title'] : '',
     );
@@ -171,13 +216,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     String selectedCategory = isEditing
         ? expenseToEdit['category']
         : (_categories.isNotEmpty ? _categories[0] : 'أخرى');
-    DateTime selectedDate = isEditing
+    DateTime selectedDate = isEditing && expenseToEdit['date'] != null
         ? DateTime.parse(expenseToEdit['date'])
         : DateTime.now();
 
-    // التأكد من وجود التصنيف
     if (!_categories.contains(selectedCategory)) {
-      selectedCategory = _categories[0];
+      _categories.add(selectedCategory);
     }
 
     showDialog(
@@ -185,22 +229,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       builder: (_) {
         return StatefulBuilder(
           builder: (context, setStateSB) {
-            final isDark = Theme.of(context).brightness == Brightness.dark;
-
             return AlertDialog(
               title: Text(isEditing ? 'تعديل مصروف' : 'تسجيل مصروف جديد'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // المبلغ (إجباري + أرقام فقط)
                     TextField(
                       controller: amountController,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
-                      ), // كيبورد أرقام
+                      ),
                       inputFormatters: [
-                        // 🆕 السماح بالأرقام ونقطة واحدة فقط (للأرقام العشرية)
                         FilteringTextInputFormatter.allow(
                           RegExp(r'^\d+\.?\d*'),
                         ),
@@ -213,8 +253,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-
-                    // العنوان
                     TextField(
                       controller: titleController,
                       decoration: const InputDecoration(
@@ -225,8 +263,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-
-                    // التصنيف
                     Row(
                       children: [
                         Expanded(
@@ -263,8 +299,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-
-                    // التاريخ
                     InkWell(
                       onTap: () async {
                         final picked = await showDatePicker(
@@ -294,8 +328,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-
-                    // ملاحظات
                     TextField(
                       controller: notesController,
                       decoration: const InputDecoration(
@@ -322,43 +354,47 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       String finalTitle = titleController.text.isEmpty
                           ? selectedCategory
                           : titleController.text;
-
-                      if (isEditing) {
-                        // 🆕 منطق التعديل
-                        await DatabaseHelper().updateExpense({
-                          'id': expenseToEdit['id'], // مهم جداً الـ ID
-                          'title': finalTitle,
-                          'amount':
-                              double.tryParse(amountController.text) ?? 0.0,
-                          'category': selectedCategory,
-                          'date': selectedDate.toString(),
-                          'notes': notesController.text,
-                        });
-                      } else {
-                        // منطق الإضافة
-                        await DatabaseHelper().insertExpense({
-                          'title': finalTitle,
-                          'amount':
-                              double.tryParse(amountController.text) ?? 0.0,
-                          'category': selectedCategory,
-                          'date': selectedDate.toString(),
-                          'notes': notesController.text,
-                        });
-                      }
-
-                      Navigator.pop(context);
-                      _loadExpenses();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            isEditing
-                                ? 'تم تعديل المصروف بنجاح'
-                                : 'تم تسجيل المصروف بنجاح',
-                            style: const TextStyle(color: Colors.white),
+                      try {
+                        if (isEditing) {
+                          await PBHelper().updateExpense(expenseToEdit['id'], {
+                            'title': finalTitle,
+                            'amount':
+                                double.tryParse(amountController.text) ?? 0.0,
+                            'category': selectedCategory,
+                            'date': selectedDate.toIso8601String(),
+                            'notes': notesController.text,
+                          });
+                        } else {
+                          await PBHelper().insertExpense({
+                            'title': finalTitle,
+                            'amount':
+                                double.tryParse(amountController.text) ?? 0.0,
+                            'category': selectedCategory,
+                            'date': selectedDate.toIso8601String(),
+                            'notes': notesController.text,
+                          });
+                        }
+                        Navigator.pop(context);
+                        _loadExpenses();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              isEditing
+                                  ? 'تم تعديل المصروف بنجاح'
+                                  : 'تم تسجيل المصروف بنجاح',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            backgroundColor: Colors.green,
                           ),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
+                        );
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('خطأ: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -378,7 +414,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
-  void _deleteExpense(int id) async {
+  void _deleteExpense(String id) async {
+    if (!_canDelete) return; // حماية
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -392,7 +430,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await DatabaseHelper().deleteExpense(id);
+              await PBHelper().deleteExpense(id);
               _loadExpenses();
             },
             child: const Text('حذف', style: TextStyle(color: Colors.red)),
@@ -449,7 +487,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               ],
             ),
           ),
-
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -513,7 +550,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                 ),
                             ],
                           ),
-                          // 🆕 أزرار التعديل والحذف
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -526,25 +562,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                 ),
                               ),
                               const SizedBox(width: 5),
-                              // زر التعديل
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.edit,
-                                  color: Colors.blue,
-                                  size: 20,
+
+                              // ✅ 3. أزرار التعديل والحذف (تخضع للصلاحية)
+                              if (_canAdd)
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit,
+                                    color: Colors.blue,
+                                    size: 20,
+                                  ),
+                                  onPressed: () =>
+                                      _showExpenseDialog(expenseToEdit: item),
                                 ),
-                                onPressed: () =>
-                                    _showExpenseDialog(expenseToEdit: item),
-                              ),
-                              // زر الحذف
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.delete,
-                                  color: Colors.grey,
-                                  size: 20,
+                              if (_canDelete)
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.grey,
+                                    size: 20,
+                                  ),
+                                  onPressed: () => _deleteExpense(item['id']),
                                 ),
-                                onPressed: () => _deleteExpense(item['id']),
-                              ),
                             ],
                           ),
                         ),
@@ -554,13 +592,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        // عند الإضافة نرسل null
-        onPressed: () => _showExpenseDialog(),
-        label: const Text('تسجيل مصروف', style: TextStyle(color: Colors.white)),
-        icon: const Icon(Icons.add, color: Colors.white),
-        backgroundColor: Colors.red[700],
-      ),
+      // ✅ 4. زر إضافة مصروف (يخضع للصلاحية)
+      floatingActionButton: _canAdd
+          ? FloatingActionButton.extended(
+              onPressed: () => _showExpenseDialog(),
+              label: const Text(
+                'تسجيل مصروف',
+                style: TextStyle(color: Colors.white),
+              ),
+              icon: const Icon(Icons.add, color: Colors.white),
+              backgroundColor: Colors.red[700],
+            )
+          : null,
     );
   }
 }

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'dashboard.dart';
+import 'dashboard.dart'; // تأكد أن ملف الداشبورد موجود
+import 'login_screen.dart';
+import 'pb_helper.dart'; // ✅ لازم نستدعي الـ Helper عشان نفحص الدخول
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -13,10 +15,29 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    _checkLoginStatus();
+  }
+
+  // دالة للتحقق من حالة الدخول
+  void _checkLoginStatus() {
+    // ننتظر 3 ثواني عشان اللوجو يظهر للمستخدم
     Timer(const Duration(seconds: 3), () {
-      if (mounted) {
+      if (!mounted) return;
+
+      // ✅ هنا الفحص السحري:
+      // PBHelper بيحمل التوكن من SharedPreferences أوتوماتيك في main.dart
+      // فاحنا بس بنسأله: هل التوكن ده لسه شغال؟
+      bool isLoggedIn = PBHelper().pb.authStore.isValid;
+
+      if (isLoggedIn) {
+        // لو مسجل دخول، روح للداشبورد علطول
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => const DashboardScreen()),
+        );
+      } else {
+        // لو مش مسجل، روح لشاشة اللوجين
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
         );
       }
     });
@@ -25,23 +46,17 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors
-          .white, // 1. \u063a\u064a\u0631\u0646\u0627 \u0627\u0644\u0644\u0648\u0646 \u0644\u0623\u0628\u064a\u0636
+      backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // \u0627\u0644\u0644\u0648\u062c\u0648
+            // اللوجو
             Image.asset('assets/splash_logo.png', width: 250, height: 250),
             const SizedBox(height: 20),
 
-            // \u0627\u0644\u0627\u0633\u0645
-            const SizedBox(height: 30),
-            // \u0645\u0624\u0634\u0631 \u0627\u0644\u062a\u062d\u0645\u064a\u0644
-            const CircularProgressIndicator(
-              color: Colors
-                  .teal, // 3. \u063a\u064a\u0631\u0646\u0627 \u0644\u0648\u0646 \u0627\u0644\u062a\u062d\u0645\u064a\u0644
-            ),
+            // مؤشر التحميل
+            const CircularProgressIndicator(color: Colors.teal),
           ],
         ),
       ),

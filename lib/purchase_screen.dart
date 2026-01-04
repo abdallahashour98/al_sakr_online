@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'db_helper.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
+import 'product_dialog.dart';
+import 'supplier_dialog.dart';
+import 'pb_helper.dart';
 
 class PurchaseScreen extends StatefulWidget {
   const PurchaseScreen({super.key});
@@ -13,13 +13,11 @@ class PurchaseScreen extends StatefulWidget {
 
 class _PurchaseScreenState extends State<PurchaseScreen> {
   // --- المتغيرات ---
-  List<Map<String, dynamic>> _suppliers = [];
-  List<Map<String, dynamic>> _products = [];
-  final List<Map<String, dynamic>> _cart = [];
   List<String> _units = [];
+  final List<Map<String, dynamic>> _cart = [];
 
-  int? _selectedSupplierId;
-  int? _selectedProductId;
+  String? _selectedSupplierId;
+  String? _selectedProductId;
 
   final TextEditingController _supplierSearchController =
       TextEditingController();
@@ -34,27 +32,61 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
 
   DateTime _invoiceDate = DateTime.now();
 
-  // إعدادات الفاتورة
-  bool _isTaxEnabled = false; // 14%
-  bool _isWhtEnabled = false; // 1%
-  bool _isCashPayment = false; // المشتريات غالباً آجل
+  bool _isTaxEnabled = false;
+  bool _isWhtEnabled = false;
+  bool _isCashPayment = false;
+
+  // ✅ 1. متغيرات الصلاحيات
+  bool _canAddPurchase = false;
+  bool _canAddSupplier = false;
+  bool _canAddProduct = false;
+
+  final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _loadPermissions(); // تحميل الصلاحيات
+    _loadUnits();
   }
 
-  Future<void> _loadData() async {
-    final suppliers = await DatabaseHelper().getSuppliers();
-    final products = await DatabaseHelper().getProducts();
-    final unitsData = await DatabaseHelper().getUnits();
+  // ✅ 2. دالة تحميل الصلاحيات
+  Future<void> _loadPermissions() async {
+    final myId = PBHelper().pb.authStore.record?.id;
+    if (myId == null) return;
 
+    if (myId == _superAdminId) {
+      if (mounted) {
+        setState(() {
+          _canAddPurchase = true;
+          _canAddSupplier = true;
+          _canAddProduct = true;
+        });
+      }
+      return;
+    }
+
+    try {
+      final userRecord = await PBHelper().pb.collection('users').getOne(myId);
+      if (mounted) {
+        setState(() {
+          _canAddPurchase = userRecord.data['allow_add_purchases'] ?? false;
+          // نستخدم صلاحية العملاء والموردين لإضافة المورد
+          _canAddSupplier = userRecord.data['allow_add_clients'] ?? false;
+          _canAddProduct = userRecord.data['allow_add_products'] ?? false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading perms: $e");
+    }
+  }
+
+  Future<void> _loadUnits() async {
+    final unitsData = await PBHelper().getUnits();
     if (mounted) {
       setState(() {
-        _suppliers = suppliers;
-        _products = products;
-        _units = unitsData.map((u) => u['name'] as String).toList();
+        _units = unitsData;
+        if (_units.isEmpty) _units = ['قطعة', 'كرتونة'];
       });
     }
   }
@@ -69,28 +101,36 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
   }
 
   double get _discount => double.tryParse(_discountController.text) ?? 0.0;
-
-  // الضريبة تضاف (14%)
   double get _taxAmount => _isTaxEnabled ? (_subTotal - _discount) * 0.14 : 0.0;
-
-  // ضريبة الخصم 1% (تضاف للمبلغ)
   double get _whtAmount => _isWhtEnabled ? (_subTotal - _discount) * 0.01 : 0.0;
-
-  // الإجمالي النهائي
   double get _grandTotal => (_subTotal - _discount) + _taxAmount - _whtAmount;
 
   // --- الصور ---
   Widget _buildProductImage(String? imagePath, {double size = 45}) {
-    if (imagePath != null && File(imagePath).existsSync()) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.file(
-          File(imagePath),
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-        ),
-      );
+    if (imagePath != null && imagePath.isNotEmpty) {
+      if (imagePath.startsWith('http')) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            imagePath,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) =>
+                Icon(Icons.broken_image, size: size, color: Colors.grey),
+          ),
+        );
+      } else if (File(imagePath).existsSync()) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            File(imagePath),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+          ),
+        );
+      }
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
@@ -105,257 +145,70 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     );
   }
 
-  // --- إضافة مورد ---
-  Future<void> _showAddSupplierDialog() async {
-    final nameController = TextEditingController();
-    final phoneController = TextEditingController();
-    final balanceController = TextEditingController();
-    bool isLiability = true;
+  // ============================================================
+  // ✅ استدعاء الكلاسات الجديدة (مع الصلاحيات)
+  // ============================================================
 
-    await showDialog(
+  Future<void> _openAddSupplierDialog() async {
+    // حماية
+    if (!_canAddSupplier) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ليس لديك صلاحية إضافة موردين')),
+      );
+      return;
+    }
+
+    final result = await showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setStateSB) => AlertDialog(
-          title: const Text('إضافة مورد جديد'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'اسم المورد/الشركة',
-                    prefixIcon: Icon(Icons.business),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'رقم الهاتف',
-                    prefixIcon: Icon(Icons.phone),
-                  ),
-                ),
-                const Divider(),
-                const Text(
-                  "الرصيد الافتتاحي",
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                TextField(
-                  controller: balanceController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'المبلغ',
-                    prefixIcon: Icon(Icons.account_balance_wallet),
-                  ),
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: RadioListTile<bool>(
-                        title: const Text("علينا (له)"),
-                        value: true,
-                        groupValue: isLiability,
-                        activeColor: Colors.red,
-                        onChanged: (v) => setStateSB(() => isLiability = v!),
-                      ),
-                    ),
-                    Expanded(
-                      child: RadioListTile<bool>(
-                        title: const Text("لنا (عليه)"),
-                        value: false,
-                        groupValue: isLiability,
-                        activeColor: Colors.green,
-                        onChanged: (v) => setStateSB(() => isLiability = v!),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (nameController.text.isNotEmpty) {
-                  double amount =
-                      double.tryParse(balanceController.text) ?? 0.0;
-                  double finalBalance = isLiability ? amount : -amount;
-                  int id = await DatabaseHelper().insertSupplier({
-                    'name': nameController.text,
-                    'phone': phoneController.text,
-                    'balance': finalBalance,
-                  });
-                  if (amount > 0) {
-                    await DatabaseHelper().updateSupplierOpeningBalance(
-                      id,
-                      finalBalance,
-                    );
-                  }
-                  Navigator.pop(ctx);
-                  await _loadData();
-                  setState(() {
-                    _selectedSupplierId = id;
-                    _supplierSearchController.text = nameController.text;
-                  });
-                }
-              },
-              child: const Text('حفظ'),
-            ),
-          ],
-        ),
-      ),
+      barrierDismissible: false,
+      builder: (ctx) => const SupplierDialog(),
     );
+
+    if (result != null && result is Map) {
+      setState(() {
+        _selectedSupplierId = result['id'];
+        _supplierSearchController.text = result['name'];
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم تحديد المورد الجديد تلقائياً ✅'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
-  // --- إضافة صنف ---
-  Future<void> _showAddProductDialog() async {
-    final nameController = TextEditingController();
-    final codeController = TextEditingController();
-    final buyPriceController = TextEditingController();
-    final sellPriceController = TextEditingController();
-    final stockController = TextEditingController(text: '0');
-    String selectedUnit = _units.isNotEmpty ? _units.first : 'قطعة';
-    String? selectedImagePath;
+  Future<void> _openAddProductDialog() async {
+    // حماية
+    if (!_canAddProduct) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ليس لديك صلاحية إضافة أصناف')),
+      );
+      return;
+    }
 
-    await showDialog(
+    final result = await showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setStateSB) => AlertDialog(
-          title: const Text('إضافة صنف جديد'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GestureDetector(
-                  onTap: () async {
-                    final picker = ImagePicker();
-                    final picked = await picker.pickImage(
-                      source: ImageSource.gallery,
-                    );
-                    if (picked != null) {
-                      final appDir = await getApplicationSupportDirectory();
-                      final fileName =
-                          '${DateTime.now().millisecondsSinceEpoch}.jpg';
-                      final saved = await File(
-                        picked.path,
-                      ).copy('${appDir.path}/$fileName');
-                      setStateSB(() => selectedImagePath = saved.path);
-                    }
-                  },
-                  child: CircleAvatar(
-                    radius: 35,
-                    backgroundImage: selectedImagePath != null
-                        ? FileImage(File(selectedImagePath!))
-                        : null,
-                    child: selectedImagePath == null
-                        ? const Icon(Icons.add_a_photo)
-                        : null,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'اسم الصنف',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: codeController,
-                        decoration: const InputDecoration(
-                          labelText: 'كود',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: TextField(
-                        controller: stockController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'رصيد',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: buyPriceController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'سعر الشراء',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: TextField(
-                        controller: sellPriceController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'سعر البيع',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (nameController.text.isNotEmpty) {
-                  int id = await DatabaseHelper().insertProduct({
-                    'name': nameController.text,
-                    'code': codeController.text,
-                    'unit': selectedUnit,
-                    'buyPrice': double.tryParse(buyPriceController.text) ?? 0.0,
-                    'sellPrice':
-                        double.tryParse(sellPriceController.text) ?? 0.0,
-                    'stock': int.tryParse(stockController.text) ?? 0,
-                    'imagePath': selectedImagePath,
-                  });
-                  Navigator.pop(ctx);
-                  await _loadData();
-                  setState(() {
-                    _selectedProductId = id;
-                    _productSearchController.text = nameController.text;
-                    _costPriceController.text = buyPriceController.text;
-                  });
-                }
-              },
-              child: const Text('حفظ'),
-            ),
-          ],
-        ),
-      ),
+      barrierDismissible: false,
+      builder: (ctx) => const ProductDialog(),
     );
+
+    if (result != null && result is Map) {
+      setState(() {
+        _selectedProductId = result['id'];
+        _productSearchController.text = result['name'];
+        _costPriceController.text = (result['buyPrice'] ?? 0).toString();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم تحديد الصنف الجديد تلقائياً ✅'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
-  // --- البحث ---
+  // --- البحث (Real-time Stream) ---
   void _showSearchDialog({required bool isSupplier}) {
     showDialog(
       context: context,
@@ -363,23 +216,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         String query = '';
         return StatefulBuilder(
           builder: (ctx, setStateSB) {
-            var filteredList = isSupplier
-                ? _suppliers
-                      .where(
-                        (s) => s['name'].toLowerCase().contains(
-                          query.toLowerCase(),
-                        ),
-                      )
-                      .toList()
-                : _products
-                      .where(
-                        (p) =>
-                            p['name'].toLowerCase().contains(
-                              query.toLowerCase(),
-                            ) ||
-                            (p['code'] ?? '').contains(query),
-                      )
-                      .toList();
             return AlertDialog(
               title: Text(isSupplier ? 'بحث عن مورد' : 'بحث عن صنف'),
               content: SizedBox(
@@ -397,45 +233,85 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                     ),
                     const SizedBox(height: 10),
                     Expanded(
-                      child: ListView.separated(
-                        separatorBuilder: (c, i) => const Divider(),
-                        itemCount: filteredList.length,
-                        itemBuilder: (context, index) {
-                          final item = filteredList[index];
-                          if (isSupplier) {
-                            return ListTile(
-                              leading: const CircleAvatar(
-                                child: Icon(Icons.person),
-                              ),
-                              title: Text(item['name']),
-                              onTap: () {
-                                setState(() {
-                                  _selectedSupplierId = item['id'];
-                                  _supplierSearchController.text = item['name'];
-                                });
-                                Navigator.pop(ctx);
-                              },
+                      child: StreamBuilder<List<Map<String, dynamic>>>(
+                        stream: PBHelper().getCollectionStream(
+                          isSupplier ? 'suppliers' : 'products',
+                          sort: isSupplier ? 'name' : '-created',
+                        ),
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError)
+                            return Center(
+                              child: Text('خطأ: ${snapshot.error}'),
                             );
-                          } else {
-                            return ListTile(
-                              leading: _buildProductImage(item['imagePath']),
-                              title: Text(item['name']),
-                              subtitle: Text("مخزن: ${item['stock']}"),
-                              trailing: Text(
-                                "${item['buyPrice']}",
-                                style: const TextStyle(color: Colors.grey),
-                              ),
-                              onTap: () {
-                                setState(() {
-                                  _selectedProductId = item['id'];
-                                  _productSearchController.text = item['name'];
-                                  _costPriceController.text = item['buyPrice']
-                                      .toString();
-                                });
-                                Navigator.pop(ctx);
-                              },
+                          if (!snapshot.hasData)
+                            return const Center(
+                              child: CircularProgressIndicator(),
                             );
-                          }
+
+                          final allItems = snapshot.data!;
+                          final filteredList = allItems.where((item) {
+                            final q = query.toLowerCase();
+                            final name = (item['name'] ?? '')
+                                .toString()
+                                .toLowerCase();
+                            if (isSupplier) {
+                              return name.contains(q);
+                            } else {
+                              final code = (item['code'] ?? '')
+                                  .toString()
+                                  .toLowerCase();
+                              return name.contains(q) || code.contains(q);
+                            }
+                          }).toList();
+
+                          if (filteredList.isEmpty)
+                            return const Center(child: Text("لا توجد نتائج"));
+
+                          return ListView.separated(
+                            separatorBuilder: (c, i) => const Divider(),
+                            itemCount: filteredList.length,
+                            itemBuilder: (context, index) {
+                              final item = filteredList[index];
+                              if (isSupplier) {
+                                return ListTile(
+                                  leading: const CircleAvatar(
+                                    child: Icon(Icons.person),
+                                  ),
+                                  title: Text(item['name']),
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedSupplierId = item['id'];
+                                      _supplierSearchController.text =
+                                          item['name'];
+                                    });
+                                    Navigator.pop(ctx);
+                                  },
+                                );
+                              } else {
+                                return ListTile(
+                                  leading: _buildProductImage(
+                                    item['imagePath'],
+                                  ),
+                                  title: Text(item['name']),
+                                  subtitle: Text("مخزن: ${item['stock']}"),
+                                  trailing: Text(
+                                    "${item['buyPrice']}",
+                                    style: const TextStyle(color: Colors.grey),
+                                  ),
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedProductId = item['id'];
+                                      _productSearchController.text =
+                                          item['name'];
+                                      _costPriceController.text =
+                                          item['buyPrice'].toString();
+                                    });
+                                    Navigator.pop(ctx);
+                                  },
+                                );
+                              }
+                            },
+                          );
                         },
                       ),
                     ),
@@ -454,15 +330,16 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         _qtyController.text.isEmpty ||
         _costPriceController.text.isEmpty)
       return;
-    final product = _products.firstWhere((p) => p['id'] == _selectedProductId);
     int qty = int.tryParse(_qtyController.text) ?? 0;
     double cost = double.tryParse(_costPriceController.text) ?? 0.0;
     if (qty <= 0) return;
 
+    String prodName = _productSearchController.text;
+
     setState(() {
       _cart.add({
-        'productId': product['id'],
-        'name': product['name'],
+        'productId': _selectedProductId!,
+        'name': prodName,
         'price': cost,
         'quantity': qty,
         'total': (qty * cost).toDouble(),
@@ -475,6 +352,14 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
   }
 
   void _submitPurchase() async {
+    // ✅ حماية زر الحفظ
+    if (!_canAddPurchase) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ليس لديك صلاحية حفظ فاتورة مشتريات')),
+      );
+      return;
+    }
+
     if (_selectedSupplierId == null || _cart.isEmpty) {
       ScaffoldMessenger.of(
         context,
@@ -482,24 +367,32 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
       return;
     }
 
-    await DatabaseHelper().createPurchase(
-      _selectedSupplierId!,
-      _grandTotal, // الإجمالي النهائي
-      _cart,
-      refNumber: _refNumController.text,
-      customDate: _invoiceDate.toString(),
-      taxAmount: _taxAmount,
-      whtAmount: _whtAmount,
-    );
+    try {
+      await PBHelper().createPurchase(
+        _selectedSupplierId!,
+        _grandTotal,
+        _cart,
+        refNumber: _refNumController.text,
+        customDate: _invoiceDate.toIso8601String(),
+        taxAmount: _taxAmount,
+        whtAmount: _whtAmount,
+        discount: _discount,
+        paymentType: _isCashPayment ? 'cash' : 'credit',
+      );
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('تم حفظ الفاتورة بنجاح ✅'),
-        backgroundColor: Colors.green,
-      ),
-    );
-    Navigator.pop(context);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم الحفظ بنجاح'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('خطأ: $e')));
+    }
   }
 
   @override
@@ -509,7 +402,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     final blueColor = Colors.blue[800]!;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('فاتورة مشتريات (توريد)')),
+      appBar: AppBar(title: const Text('فاتورة مشتريات ')),
       body: Column(
         children: [
           // 1. الجزء العلوي
@@ -532,10 +425,13 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                             prefixIcon: const Icon(Icons.local_shipping),
                             border: const OutlineInputBorder(),
                             isDense: true,
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.add_circle),
-                              onPressed: _showAddSupplierDialog,
-                            ),
+                            // ✅ زر إضافة مورد
+                            suffixIcon: _canAddSupplier
+                                ? IconButton(
+                                    icon: const Icon(Icons.add_circle),
+                                    onPressed: _openAddSupplierDialog,
+                                  )
+                                : null,
                           ),
                         ),
                       ),
@@ -590,10 +486,13 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                             prefixIcon: const Icon(Icons.category),
                             border: const OutlineInputBorder(),
                             isDense: true,
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.add_box),
-                              onPressed: _showAddProductDialog,
-                            ),
+                            // ✅ زر إضافة صنف
+                            suffixIcon: _canAddProduct
+                                ? IconButton(
+                                    icon: const Icon(Icons.add_box),
+                                    onPressed: _openAddProductDialog,
+                                  )
+                                : null,
                           ),
                         ),
                       ),
@@ -687,7 +586,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                   ),
           ),
 
-          // 3. الجزء السفلي (التصميم النهائي الموزع + Expanded)
+          // 3. الجزء السفلي
           Container(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             decoration: BoxDecoration(
@@ -706,11 +605,9 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // الصف العلوي للتحكم
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // 1. الدفع (يمين)
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.grey.withOpacity(0.1),
@@ -724,10 +621,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                         ],
                       ),
                     ),
-
                     const SizedBox(width: 10),
-
-                    // 2. الخصم (وسط) - واخد Expanded عشان يملى المساحة
                     Expanded(
                       child: TextField(
                         controller: _discountController,
@@ -749,10 +643,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                         onChanged: (val) => setState(() {}),
                       ),
                     ),
-
                     const SizedBox(width: 10),
-
-                    // 3. الضرايب (يسار)
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -773,10 +664,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                     ),
                   ],
                 ),
-
                 const Divider(height: 25),
-
-                // تفاصيل الأرقام
                 Column(
                   children: [
                     _buildSummaryLine("المجموع الفرعي", _subTotal),
@@ -794,16 +682,15 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                       ),
                     if (_discount > 0)
                       _buildSummaryLine(
-                        "خصم تجاري (-)",
+                        "خصم إضافي (-)",
                         _discount,
                         color: Colors.red,
                       ),
                   ],
                 ),
-
                 const SizedBox(height: 20),
 
-                // زر الحفظ العائم (أزرق)
+                // ✅ زر الحفظ (يخضع للصلاحية)
                 GestureDetector(
                   onTap: _submitPurchase,
                   child: Container(
@@ -812,7 +699,9 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                       vertical: 15,
                     ),
                     decoration: BoxDecoration(
-                      color: blueColor, // أزرق
+                      color: _canAddPurchase
+                          ? blueColor
+                          : Colors.grey, // لون باهت لو ممنوع
                       borderRadius: BorderRadius.circular(50),
                       boxShadow: [
                         BoxShadow(
@@ -825,9 +714,9 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          "حفظ الفاتورة",
-                          style: TextStyle(
+                        Text(
+                          _canAddPurchase ? "حفظ الفاتورة" : "غير مسموح بالحفظ",
+                          style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
@@ -863,7 +752,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     );
   }
 
-  // --- Widgets مساعدة ---
+  // Helper Widgets (Same as before)
   Widget _buildToggleChip(
     String label,
     bool value,

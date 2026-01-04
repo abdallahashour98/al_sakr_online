@@ -4,10 +4,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'db_helper.dart';
+import 'pb_helper.dart'; // ✅ استبدال المكتبة
 
 class ExcelService {
-  final dbHelper = DatabaseHelper();
+  // ✅ لم نعد بحاجة لـ DatabaseHelper
 
   // =============================================================
   // 1️⃣ دالة التصدير الشامل (Export All Sheets)
@@ -21,7 +21,7 @@ class ExcelService {
       _addSheet(
         excel,
         'المخزن',
-        await dbHelper.getProducts(),
+        await PBHelper().getProducts(), // ✅ جلب من PB
         [
           'id',
           'name',
@@ -30,7 +30,7 @@ class ExcelService {
           'buyPrice',
           'sellPrice',
           'stock',
-          'category',
+          'unit', // تم تعديل category إلى unit حسب الـ Schema
         ],
         [
           'ID',
@@ -40,7 +40,7 @@ class ExcelService {
           'سعر الشراء',
           'سعر البيع',
           'الرصيد',
-          'التصنيف',
+          'الوحدة',
         ],
       );
 
@@ -48,10 +48,10 @@ class ExcelService {
       _addSheet(
         excel,
         'سجل المبيعات',
-        await dbHelper.getSalesWithNames(),
+        await PBHelper().getSales(), // ✅ دالة موجودة في PBHelper
         [
           'id',
-          'clientName',
+          'clientName', // تأكد أن PBHelper يرجع الاسم عبر expand
           'totalAmount',
           'discount',
           'netAmount',
@@ -69,20 +69,20 @@ class ExcelService {
         ],
       );
 
-      // 3. مرتجعات المبيعات (عملاء)
+      // 3. مرتجعات العملاء
       _addSheet(
         excel,
         'مرتجعات العملاء',
-        await dbHelper.getAllReturns(),
-        ['id', 'saleId', 'clientName', 'totalAmount', 'date'],
-        ['رقم المرتجع', 'رقم الفاتورة', 'العميل', 'المبلغ المسترد', 'التاريخ'],
+        await PBHelper().getAllReturns(),
+        ['id', 'clientName', 'totalAmount', 'date'],
+        ['رقم المرتجع', 'العميل', 'المبلغ المسترد', 'التاريخ'],
       );
 
       // 4. سجل المشتريات
       _addSheet(
         excel,
         'سجل المشتريات',
-        await dbHelper.getPurchasesWithNames(),
+        await PBHelper().getPurchasesWithNames(),
         [
           'id',
           'supplierName',
@@ -101,29 +101,29 @@ class ExcelService {
         ],
       );
 
-      // 5. مرتجعات المشتريات (موردين)
+      // 5. مرتجعات المشتريات
       _addSheet(
         excel,
         'مرتجعات الموردين',
-        await dbHelper.getAllPurchaseReturns(),
+        await PBHelper().getAllPurchaseReturns(),
         ['id', 'invoiceId', 'supplierName', 'totalAmount', 'date'],
-        ['رقم المرتجع', 'رقم الفاتورة', 'المورد', 'المبلغ', 'التاريخ'],
+        ['رقم المرتجع', 'رقم الفاتورة الأصلية', 'المورد', 'المبلغ', 'التاريخ'],
       );
 
-      // 6. حسابات العملاء (إدارة وأرصدة)
+      // 6. حسابات العملاء
       _addSheet(
         excel,
         'حسابات العملاء',
-        await dbHelper.getClients(),
+        await PBHelper().getClients(),
         ['id', 'name', 'phone', 'address', 'balance'],
         ['ID', 'اسم العميل', 'رقم الهاتف', 'العنوان', 'المديونية الحالية'],
       );
 
-      // 7. حسابات الموردين (إدارة وأرصدة)
+      // 7. حسابات الموردين
       _addSheet(
         excel,
         'حسابات الموردين',
-        await dbHelper.getSuppliers(),
+        await PBHelper().getSuppliers(),
         ['id', 'name', 'phone', 'contactPerson', 'balance'],
         ['ID', 'اسم المورد', 'رقم الهاتف', 'المسئول', 'المديونية الحالية'],
       );
@@ -132,7 +132,7 @@ class ExcelService {
       _addSheet(
         excel,
         'المصروفات',
-        await dbHelper.getExpenses(),
+        await PBHelper().getExpenses(),
         ['id', 'title', 'amount', 'category', 'date', 'notes'],
         ['ID', 'البند', 'المبلغ', 'التصنيف', 'التاريخ', 'ملاحظات'],
       );
@@ -146,7 +146,7 @@ class ExcelService {
           .toString()
           .replaceAll(':', '-')
           .split('.')[0];
-      final fileName = "تقرير_الصقر_الشامل_$dateStr.xlsx";
+      final fileName = "تقرير_شامل_$dateStr.xlsx";
       final tempPath = "${tempDir.path}/$fileName";
 
       File(tempPath)
@@ -156,17 +156,18 @@ class ExcelService {
       if (Platform.isAndroid || Platform.isIOS) {
         await Share.shareXFiles([
           XFile(tempPath),
-        ], text: 'التقرير المحاسبي الشامل - الصقر');
+        ], text: 'التقرير المحاسبي الشامل');
       } else {
         String? outputFile = await FilePicker.platform.saveFile(
-          dialogTitle: 'اختر مكان حفظ الملف المنظم',
+          dialogTitle: 'حفظ الملف',
           fileName: fileName,
           allowedExtensions: ['xlsx'],
           type: FileType.custom,
         );
         if (outputFile != null) {
-          if (!outputFile.toLowerCase().endsWith('.xlsx'))
+          if (!outputFile.toLowerCase().endsWith('.xlsx')) {
             outputFile = '$outputFile.xlsx';
+          }
           await File(tempPath).copy(outputFile);
         }
       }
@@ -201,6 +202,7 @@ class ExcelService {
         for (int i = 1; i < prodTable.maxRows; i++) {
           var row = prodTable.rows[i];
           if (row.isEmpty || row[1]?.value == null) continue;
+
           Map<String, dynamic> data = {
             'name': row[1]?.value?.toString(),
             'code': row[2]?.value?.toString() ?? '',
@@ -210,9 +212,11 @@ class ExcelService {
             'sellPrice':
                 double.tryParse(row[5]?.value?.toString() ?? '0') ?? 0.0,
             'stock': int.tryParse(row[6]?.value?.toString() ?? '0') ?? 0,
-            'category': row[7]?.value?.toString() ?? 'عام',
+            'unit': row[7]?.value?.toString() ?? 'قطعة', // Schema field is unit
           };
-          await _insertOrUpdate('products', row[0]?.value?.toString(), data);
+
+          // ملاحظة: لا نمرر الصورة عند الاستيراد من الإكسل
+          await _insertOrUpdateProduct(row[0]?.value?.toString(), data);
           prodCount++;
         }
       }
@@ -230,7 +234,7 @@ class ExcelService {
             'address': row[3]?.value?.toString() ?? '',
             'balance': double.tryParse(row[4]?.value?.toString() ?? '0') ?? 0.0,
           };
-          await _insertOrUpdate('clients', row[0]?.value?.toString(), data);
+          await _insertOrUpdateClient(row[0]?.value?.toString(), data);
           clientCount++;
         }
       }
@@ -248,7 +252,7 @@ class ExcelService {
             'contactPerson': row[3]?.value?.toString() ?? '',
             'balance': double.tryParse(row[4]?.value?.toString() ?? '0') ?? 0.0,
           };
-          await _insertOrUpdate('suppliers', row[0]?.value?.toString(), data);
+          await _insertOrUpdateSupplier(row[0]?.value?.toString(), data);
           suppCount++;
         }
       }
@@ -263,10 +267,12 @@ class ExcelService {
             'title': row[1]?.value?.toString(),
             'amount': double.tryParse(row[2]?.value?.toString() ?? '0') ?? 0.0,
             'category': row[3]?.value?.toString() ?? 'عام',
-            'date': row[4]?.value?.toString() ?? DateTime.now().toString(),
+            'date':
+                row[4]?.value?.toString() ?? DateTime.now().toIso8601String(),
             'notes': row[5]?.value?.toString() ?? '',
           };
-          await _insertOrUpdate('expenses', row[0]?.value?.toString(), data);
+          // المصروفات عادة لا تحدث، بل تضاف كجديد
+          await PBHelper().addExpense(data);
           expCount++;
         }
       }
@@ -278,7 +284,7 @@ class ExcelService {
   }
 
   // =============================================================
-  // 🛠️ دوال مساعدة (Helper Methods)
+  // 🛠️ دوال مساعدة لـ PocketBase
   // =============================================================
 
   void _addSheet(
@@ -289,7 +295,7 @@ class ExcelService {
     List<String> headers,
   ) {
     Sheet sheet = excel[sheetName];
-    sheet.isRTL = true; // اتجاه عربي
+    sheet.isRTL = true;
 
     CellStyle headerStyle = CellStyle(
       bold: true,
@@ -327,25 +333,54 @@ class ExcelService {
     }
   }
 
-  Future<void> _insertOrUpdate(
-    String table,
-    String? idStr,
+  // Helper function to check ID format (PocketBase IDs are 15 chars)
+  bool _isValidId(String? id) {
+    return id != null && id.length == 15;
+  }
+
+  Future<void> _insertOrUpdateProduct(
+    String? id,
     Map<String, dynamic> data,
   ) async {
-    final database = await dbHelper.database;
-    int? id = int.tryParse(idStr ?? '');
-
-    if (id != null && id > 0) {
-      var result = await database.query(
-        table,
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      if (result.isNotEmpty) {
-        await database.update(table, data, where: 'id = ?', whereArgs: [id]);
-        return;
+    if (_isValidId(id)) {
+      try {
+        await PBHelper().updateProduct(id!, data, null);
+      } catch (e) {
+        // إذا فشل التحديث (الـ ID غير موجود)، قم بالإضافة
+        await PBHelper().insertProduct(data, null);
       }
+    } else {
+      await PBHelper().insertProduct(data, null);
     }
-    await database.insert(table, data);
+  }
+
+  Future<void> _insertOrUpdateClient(
+    String? id,
+    Map<String, dynamic> data,
+  ) async {
+    if (_isValidId(id)) {
+      try {
+        await PBHelper().updateClient(id!, data);
+      } catch (e) {
+        await PBHelper().insertClient(data);
+      }
+    } else {
+      await PBHelper().insertClient(data);
+    }
+  }
+
+  Future<void> _insertOrUpdateSupplier(
+    String? id,
+    Map<String, dynamic> data,
+  ) async {
+    if (_isValidId(id)) {
+      try {
+        await PBHelper().updateSupplier(id!, data);
+      } catch (e) {
+        await PBHelper().insertSupplier(data);
+      }
+    } else {
+      await PBHelper().insertSupplier(data);
+    }
   }
 }

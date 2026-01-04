@@ -30,9 +30,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+    
+  flutter_localizations:
+    sdk: flutter  
     # أدوات قاعدة البيانات
-  sqflite: ^2.3.0
-  sqflite_common_ffi: ^2.3.0
+  # sqflite: ^2.3.0
+  # sqflite_common_ffi: ^2.3.0
+  pocketbase: ^0.19.0
   path: ^1.8.3
   share_plus: ^7.2.1      # عشان نشارك ملف الداتا بيز
   file_picker: ^8.0.0     # عشان نختار ملف الباك اب من الموبايل
@@ -44,13 +48,12 @@ dependencies:
   cupertino_icons: ^1.0.8
   sentry_flutter: ^9.9.1
   msix: ^3.16.1
-  firebase_core: ^3.0.0
   firebase_database: ^11.0.0
   package_info_plus: ^8.0.0
   url_launcher: ^6.3.0
   sqlite3_flutter_libs: ^0.5.20
   http: ^1.1.0
-  shared_preferences: ^2.2.2
+  shared_preferences: ^2.5.4
   pdf: ^3.10.4
   open_file: ^3.5.10
   printing: ^5.11.0
@@ -58,6 +61,7 @@ dependencies:
   syncfusion_flutter_pdf: ^24.1.41
   syncfusion_flutter_core: ^24.1.41
   arabic_reshaper: ^0.0.1
+  provider: ^6.0.0
 
   
 

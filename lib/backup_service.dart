@@ -1,276 +1,350 @@
 import 'dart:io';
-import 'package:archive/archive_io.dart'; // مكتبة التعامل مع ZIP
-import 'package:file_picker/file_picker.dart';
-import 'package:path/path.dart' as p;
+import 'package:excel/excel.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-//import 'package:sqflite/sqflite.dart'; // ❌ لم نعد نحتاجها هنا
-import 'db_helper.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // 🆕 إضافة
+import 'pb_helper.dart'; // ✅ استبدال db_helper
 
-class BackupService {
-  final String _dbName = 'SmartAccountingDB.db';
+class ExcelService {
+  final pbHelper = PBHelper();
 
-  // =================================================================
-  // 1️⃣ دالة التصدير (Export): داتا بيز + صور -> ملف ZIP
-  // =================================================================
-  Future<bool> exportBackup(BuildContext context) async {
+  // =============================================================
+  // 1️⃣ دالة التصدير الشامل (Export All Sheets)
+  // =============================================================
+  Future<void> exportFullBackup() async {
     try {
-      // 🔥 تصحيح المسار: استخدام نفس مسار db_helper 🔥
-      final appDir = await getApplicationSupportDirectory();
-      String dbPath = await DatabaseHelper().getDbPath();
-      final dbFile = File(dbPath);
+      var excel = Excel.createExcel();
+      excel.delete('Sheet1');
 
-      // تحديد مسار مجلد الصور
-      final imagesDir = Directory('${appDir.path}/product_images');
+      // 1. المخزن (الأصناف)
+      _addSheet(
+        excel,
+        'المخزن',
+        await pbHelper.getProducts(),
+        [
+          'id', // ده أصبح نص دلوقتي (String)
+          'name',
+          'code',
+          'barcode',
+          'buyPrice',
+          'sellPrice',
+          'stock',
+          'unit', // تأكد إن الحقل ده موجود في PB
+        ],
+        [
+          'ID',
+          'اسم الصنف',
+          'كود',
+          'باركود',
+          'سعر الشراء',
+          'سعر البيع',
+          'الرصيد',
+          'الوحدة',
+        ],
+      );
 
-      // إغلاق قاعدة البيانات لضمان عدم تلف البيانات أثناء النسخ
-      final dbHelper = DatabaseHelper();
-      await dbHelper.close();
+      // 2. سجل المبيعات
+      _addSheet(
+        excel,
+        'سجل المبيعات',
+        await pbHelper.getSales(), // ✅ دالة جديدة
+        [
+          'id',
+          'clientName', // بيجي من expand في PBHelper
+          'totalAmount',
+          'discount',
+          'netAmount',
+          'date',
+          'paymentType',
+        ],
+        [
+          'رقم الفاتورة',
+          'اسم العميل',
+          'الإجمالي',
+          'الخصم',
+          'الصافي',
+          'التاريخ',
+          'طريقة الدفع',
+        ],
+      );
 
-      // تجهيز ملف الـ ZIP المؤقت
+      // 3. مرتجعات المبيعات (عملاء)
+      _addSheet(
+        excel,
+        'مرتجعات العملاء',
+        await pbHelper.getReturns(), // ✅ دالة جديدة
+        ['id', 'sale', 'clientName', 'totalAmount', 'date'],
+        [
+          'رقم المرتجع',
+          'رقم الفاتورة (ID)',
+          'العميل',
+          'المبلغ المسترد',
+          'التاريخ',
+        ],
+      );
+
+      // 4. سجل المشتريات
+      _addSheet(
+        excel,
+        'سجل المشتريات',
+        await pbHelper.getPurchases(), // ✅ دالة جديدة
+        [
+          'id',
+          'supplierName',
+          'totalAmount',
+          'taxAmount',
+          'date',
+          'referenceNumber',
+        ],
+        [
+          'رقم الفاتورة',
+          'المورد',
+          'الإجمالي',
+          'الضريبة',
+          'التاريخ',
+          'رقم المرجع',
+        ],
+      );
+
+      // 5. حسابات العملاء
+      _addSheet(
+        excel,
+        'حسابات العملاء',
+        await pbHelper.getClients(),
+        ['id', 'name', 'phone', 'address', 'balance'],
+        ['ID', 'اسم العميل', 'رقم الهاتف', 'العنوان', 'المديونية الحالية'],
+      );
+
+      // 6. حسابات الموردين
+      _addSheet(
+        excel,
+        'حسابات الموردين',
+        await pbHelper.getSuppliers(),
+        ['id', 'name', 'phone', 'contactPerson', 'balance'],
+        ['ID', 'اسم المورد', 'رقم الهاتف', 'المسئول', 'المديونية الحالية'],
+      );
+
+      // 7. المصروفات
+      _addSheet(
+        excel,
+        'المصروفات',
+        await pbHelper.getExpenses(),
+        ['id', 'title', 'amount', 'category', 'date', 'notes'],
+        ['ID', 'البند', 'المبلغ', 'التصنيف', 'التاريخ', 'ملاحظات'],
+      );
+
+      // --- مرحلة الحفظ والإخراج ---
+      final fileBytes = excel.save();
+      if (fileBytes == null) return;
+
       final tempDir = await getTemporaryDirectory();
       final dateStr = DateTime.now()
           .toString()
           .replaceAll(':', '-')
           .split('.')[0];
-      final zipPath = '${tempDir.path}/AL-SAKR_Backup_$dateStr.zip';
+      final fileName = "تقرير_الصقر_الشامل_$dateStr.xlsx";
+      final tempPath = "${tempDir.path}/$fileName";
 
-      // إنشاء المشفر
-      var encoder = ZipFileEncoder();
-      encoder.create(zipPath);
+      File(tempPath)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(fileBytes);
 
-      // أ. إضافة ملف قاعدة البيانات للأرشيف
-      if (await dbFile.exists()) {
-        await encoder.addFile(dbFile, 'database.db');
-      } else {
-        // طباعة المسار للتأكد في حالة الخطأ
-        print("Could not find DB at: $dbPath");
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('خطأ: لم يتم العثور على قاعدة البيانات!'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return false;
-      }
-
-      // ب. إضافة مجلد الصور للأرشيف
-      if (await imagesDir.exists()) {
-        await encoder.addDirectory(imagesDir, includeDirName: true);
-      }
-
-      encoder.close();
-
-      // مشاركة الملف أو حفظه
       if (Platform.isAndroid || Platform.isIOS) {
         await Share.shareXFiles([
-          XFile(zipPath),
-        ], text: 'نسخة احتياطية شاملة (AL-SAKR)');
+          XFile(tempPath),
+        ], text: 'التقرير المحاسبي الشامل - الصقر');
       } else {
         String? outputFile = await FilePicker.platform.saveFile(
-          dialogTitle: 'حفظ النسخة الاحتياطية',
-          fileName: 'AL-SAKR_Backup_$dateStr.zip',
-          allowedExtensions: ['zip'],
+          dialogTitle: 'اختر مكان حفظ الملف',
+          fileName: fileName,
+          allowedExtensions: ['xlsx'],
           type: FileType.custom,
         );
-
         if (outputFile != null) {
-          if (!outputFile.toLowerCase().endsWith('.zip')) {
-            outputFile = '$outputFile.zip';
-          }
-          await File(zipPath).copy(outputFile);
-
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('تم الحفظ في: $outputFile'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
+          if (!outputFile.toLowerCase().endsWith('.xlsx'))
+            outputFile = '$outputFile.xlsx';
+          await File(tempPath).copy(outputFile);
         }
       }
-
-      return true;
     } catch (e) {
-      print("Export Error: $e");
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('فشل التصدير: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return false;
+      debugPrint('Excel Export Error: $e');
     }
   }
 
-  // =================================================================
-  // 2️⃣ دالة الاستيراد (Import): فك الضغط -> استعادة داتا بيز + صور
-  // =================================================================
-  Future<bool> importBackup(BuildContext context) async {
+  // =============================================================
+  // 2️⃣ دالة الاستيراد الشامل (Import Data)
+  // =============================================================
+  Future<String> importFullBackup() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['zip'],
+        allowedExtensions: ['xlsx', 'xls'],
       );
 
-      if (result != null && result.files.single.path != null) {
-        File zipFile = File(result.files.single.path!);
-        final bytes = await zipFile.readAsBytes();
-        final archive = ZipDecoder().decodeBytes(bytes);
+      if (result == null) return "لم يتم اختيار ملف";
 
-        // 🔥 تصحيح المسار: استخدام نفس مسار db_helper 🔥
-        final appDir = await getApplicationSupportDirectory();
-        String dbPath = await DatabaseHelper().getDbPath();
-        final imagesDestDir = Directory('${appDir.path}/product_images');
+      var bytes = File(result.files.single.path!).readAsBytesSync();
+      var excel = Excel.decodeBytes(bytes);
 
-        // إغلاق وحذف قاعدة البيانات القديمة
-        final dbHelper = DatabaseHelper();
-        await dbHelper.close();
+      int prodCount = 0;
+      int clientCount = 0;
+      int suppCount = 0;
+      int expCount = 0;
 
-        final oldDbFile = File(dbPath);
-        if (await oldDbFile.exists()) {
-          try {
-            await oldDbFile.delete();
-          } catch (e) {
-            print("Warning deleting old DB: $e");
-          }
+      // أ. استيراد المنتجات
+      var prodTable = excel.tables['المخزن'] ?? excel.tables['المنتجات'];
+      if (prodTable != null) {
+        for (int i = 1; i < prodTable.maxRows; i++) {
+          var row = prodTable.rows[i];
+          if (row.isEmpty || row[1]?.value == null) continue;
+          Map<String, dynamic> data = {
+            'name': row[1]?.value?.toString(),
+            'code': row[2]?.value?.toString() ?? '',
+            'barcode': row[3]?.value?.toString() ?? '',
+            'buyPrice':
+                double.tryParse(row[4]?.value?.toString() ?? '0') ?? 0.0,
+            'sellPrice':
+                double.tryParse(row[5]?.value?.toString() ?? '0') ?? 0.0,
+            'stock':
+                double.tryParse(row[6]?.value?.toString() ?? '0') ??
+                0, // Stock في PB ممكن يكون float
+            'unit': row[7]?.value?.toString() ?? 'قطعة',
+          };
+          // بنبعت اسم الـ Collection عشان الدالة العامة تحت
+          await _insertOrUpdatePB('products', row[0]?.value?.toString(), data);
+          prodCount++;
         }
-
-        // تنظيف وإعادة إنشاء مجلد الصور
-        if (await imagesDestDir.exists()) {
-          try {
-            await imagesDestDir.delete(recursive: true);
-          } catch (e) {
-            print("Warning deleting old images: $e");
-          }
-        }
-        await imagesDestDir.create(recursive: true);
-
-        // فك الضغط
-        for (final file in archive) {
-          if (file.isFile) {
-            if (file.name == 'database.db') {
-              final data = file.content as List<int>;
-              File(dbPath)
-                ..createSync(recursive: true)
-                ..writeAsBytesSync(data);
-            } else if (file.name.startsWith('product_images/')) {
-              final filename = p.basename(file.name);
-              if (filename.isNotEmpty && !filename.startsWith('.')) {
-                final data = file.content as List<int>;
-                File('${imagesDestDir.path}/$filename')
-                  ..createSync(recursive: true)
-                  ..writeAsBytesSync(data);
-              }
-            }
-          }
-        }
-
-        if (context.mounted) {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (ctx) => AlertDialog(
-              title: const Text(
-                'تمت الاستعادة بنجاح',
-                style: TextStyle(color: Colors.green),
-              ),
-              content: const Text(
-                'تم استرجاع البيانات والصور.\nيرجى إعادة تشغيل التطبيق لتطبيق التغييرات.',
-              ),
-              actions: [
-                ElevatedButton(
-                  onPressed: () => exit(0),
-                  child: const Text('إغلاق التطبيق'),
-                ),
-              ],
-            ),
-          );
-        }
-        return true;
       }
-      return false;
+
+      // ب. استيراد العملاء
+      var clientTable =
+          excel.tables['حسابات العملاء'] ?? excel.tables['العملاء'];
+      if (clientTable != null) {
+        for (int i = 1; i < clientTable.maxRows; i++) {
+          var row = clientTable.rows[i];
+          if (row.isEmpty || row[1]?.value == null) continue;
+          Map<String, dynamic> data = {
+            'name': row[1]?.value?.toString(),
+            'phone': row[2]?.value?.toString() ?? '',
+            'address': row[3]?.value?.toString() ?? '',
+            'balance': double.tryParse(row[4]?.value?.toString() ?? '0') ?? 0.0,
+          };
+          await _insertOrUpdatePB('clients', row[0]?.value?.toString(), data);
+          clientCount++;
+        }
+      }
+
+      // ج. استيراد الموردين
+      var suppTable =
+          excel.tables['حسابات الموردين'] ?? excel.tables['الموردين'];
+      if (suppTable != null) {
+        for (int i = 1; i < suppTable.maxRows; i++) {
+          var row = suppTable.rows[i];
+          if (row.isEmpty || row[1]?.value == null) continue;
+          Map<String, dynamic> data = {
+            'name': row[1]?.value?.toString(),
+            'phone': row[2]?.value?.toString() ?? '',
+            'contactPerson': row[3]?.value?.toString() ?? '',
+            'balance': double.tryParse(row[4]?.value?.toString() ?? '0') ?? 0.0,
+          };
+          await _insertOrUpdatePB('suppliers', row[0]?.value?.toString(), data);
+          suppCount++;
+        }
+      }
+
+      // د. استيراد المصروفات
+      var expTable = excel.tables['المصروفات'];
+      if (expTable != null) {
+        for (int i = 1; i < expTable.maxRows; i++) {
+          var row = expTable.rows[i];
+          if (row.isEmpty || row[1]?.value == null) continue;
+          Map<String, dynamic> data = {
+            'title': row[1]?.value?.toString(),
+            'amount': double.tryParse(row[2]?.value?.toString() ?? '0') ?? 0.0,
+            'category': row[3]?.value?.toString() ?? 'عام',
+            'date': row[4]?.value?.toString() ?? DateTime.now().toString(),
+            'notes': row[5]?.value?.toString() ?? '',
+          };
+          await _insertOrUpdatePB('expenses', row[0]?.value?.toString(), data);
+          expCount++;
+        }
+      }
+
+      return "تم الاستيراد بنجاح ✅\n- أصناف: $prodCount\n- عملاء: $clientCount\n- موردين: $suppCount\n- مصروفات: $expCount";
     } catch (e) {
-      print("Import Error: $e");
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('فشل الاستيراد: الملف تالف أو غير مدعوم ($e)'),
-            backgroundColor: Colors.red,
-          ),
+      return "خطأ أثناء الاستيراد: $e";
+    }
+  }
+
+  // =============================================================
+  // 🛠️ دوال مساعدة (Helper Methods)
+  // =============================================================
+
+  void _addSheet(
+    Excel excel,
+    String sheetName,
+    List<Map<String, dynamic>> data,
+    List<String> dbKeys,
+    List<String> headers,
+  ) {
+    Sheet sheet = excel[sheetName];
+    sheet.isRTL = true;
+
+    CellStyle headerStyle = CellStyle(
+      bold: true,
+      horizontalAlign: HorizontalAlign.Center,
+      verticalAlign: VerticalAlign.Center,
+      backgroundColorHex: ExcelColor.blueGrey700,
+      fontColorHex: ExcelColor.white,
+    );
+
+    for (int i = 0; i < headers.length; i++) {
+      var cell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0),
+      );
+      cell.value = TextCellValue(headers[i]);
+      cell.cellStyle = headerStyle;
+      sheet.setColumnWidth(i, 20.0);
+    }
+
+    for (int row = 0; row < data.length; row++) {
+      for (int col = 0; col < dbKeys.length; col++) {
+        var value = data[row][dbKeys[col]];
+        var cell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row + 1),
         );
+        cell.cellStyle = CellStyle(horizontalAlign: HorizontalAlign.Center);
+
+        if (value == null) {
+          cell.value = TextCellValue("-");
+        } else if (value is num) {
+          cell.value = DoubleCellValue(value.toDouble());
+        } else {
+          cell.value = TextCellValue(value.toString());
+        }
       }
-      return false;
     }
   }
 
-  Future<void> performAutoBackup() async {
-    try {
-      print("⏳ Starting Auto Backup...");
-
-      // 1. تحديد مسار قاعدة البيانات
-      String dbPath = await DatabaseHelper().getDbPath();
-      final dbFile = File(dbPath);
-      final appDir = await getApplicationSupportDirectory();
-      final imagesDir = Directory('${appDir.path}/product_images');
-
-      // 2. إغلاق الداتا بيز مؤقتاً
-      final dbHelper = DatabaseHelper();
-      await dbHelper.close();
-
-      // 3. تحديد مكان الحفظ التلقائي (في المستندات/Backups/Auto)
-      Directory docDir = await getApplicationDocumentsDirectory();
-      Directory backupDir = Directory('${docDir.path}/AlSakr_Backups/Auto');
-
-      if (!await backupDir.exists()) {
-        await backupDir.create(recursive: true);
+  // ✅ دالة الإدخال أو التعديل المخصصة لـ PocketBase
+  Future<void> _insertOrUpdatePB(
+    String collection,
+    String? idStr,
+    Map<String, dynamic> data,
+  ) async {
+    // 1. لو فيه ID وجاي من PocketBase (نص طويل 15 حرف)، نحاول نعدل عليه
+    if (idStr != null && idStr.length > 5) {
+      try {
+        await PBHelper().pb.collection(collection).update(idStr, body: data);
+        return; // لو نجح التعديل نخرج
+      } catch (e) {
+        // لو فشل (مش موجود)، كمل عشان ينشئه جديد
       }
-
-      // 4. تسمية الملف بالتاريخ والوقت
-      final dateStr = DateTime.now()
-          .toString()
-          .replaceAll(':', '-')
-          .split('.')[0];
-      final zipPath = '${backupDir.path}/AutoBackup_$dateStr.zip';
-
-      // 5. الضغط
-      var encoder = ZipFileEncoder();
-      encoder.create(zipPath);
-
-      if (await dbFile.exists()) {
-        await encoder.addFile(dbFile, 'database.db');
-      }
-
-      if (await imagesDir.exists()) {
-        await encoder.addDirectory(imagesDir, includeDirName: true);
-      }
-
-      encoder.close();
-
-      // 6. 🆕 تسجيل تاريخ الباك اب في الذاكرة عشان ميعملش تاني في نفس اليوم
-      final prefs = await SharedPreferences.getInstance();
-      // نسجل التاريخ فقط (بدون الوقت) 2023-12-23
-      String todayDate = DateTime.now().toString().split(' ')[0];
-      await prefs.setString('last_auto_backup_date', todayDate);
-
-      print("✅ Auto Backup Success at: $zipPath");
-    } catch (e) {
-      print("❌ Auto Backup Failed: $e");
     }
-  }
 
-  // دالة للتحقق: هل تم عمل باك اب اليوم؟
-  Future<bool> isBackupDoneToday() async {
-    final prefs = await SharedPreferences.getInstance();
-    String? lastDate = prefs.getString('last_auto_backup_date');
-    String todayDate = DateTime.now().toString().split(' ')[0];
-    return lastDate == todayDate;
+    // 2. لو مفيش ID، أو الـ ID كان رقم قديم من SQLite (مش هينفع نستخدمه كـ ID في PB)
+    // هننشئ سجل جديد
+    await PBHelper().pb.collection(collection).create(body: data);
   }
 }

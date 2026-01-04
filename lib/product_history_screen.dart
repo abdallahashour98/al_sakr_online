@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'db_helper.dart';
+import 'pb_helper.dart'; // ✅ استبدال المكتبة
 
 class ProductHistoryScreen extends StatefulWidget {
   final Map<String, dynamic> product;
@@ -20,7 +20,8 @@ class _ProductHistoryScreenState extends State<ProductHistoryScreen> {
   }
 
   void _loadHistory() async {
-    final data = await DatabaseHelper().getProductHistory(widget.product['id']);
+    // ✅ الـ ID أصبح String ويتم جلبه من PBHelper
+    final data = await PBHelper().getProductHistory(widget.product['id']);
     if (mounted) {
       setState(() {
         _history = data;
