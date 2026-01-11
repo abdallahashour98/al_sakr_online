@@ -626,7 +626,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                       TextField(
                         controller: _refNumController,
                         decoration: const InputDecoration(
-                          labelText: 'رقم المرجع',
+                          labelText: 'رقم الفاتورة',
                           prefixIcon: Icon(Icons.receipt),
                           border: OutlineInputBorder(),
                           isDense: true,

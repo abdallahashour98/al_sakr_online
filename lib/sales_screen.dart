@@ -581,36 +581,37 @@ class _SalesScreenState extends State<SalesScreen> {
                   padding: const EdgeInsets.all(12.0),
                   child: Column(
                     children: [
+                      // الصف الأول: اسم العميل
+                      TextField(
+                        controller: _clientSearchController,
+                        readOnly: true,
+                        onTap: () => _showSearchDialog(isClient: true),
+                        decoration: InputDecoration(
+                          labelText: 'العميل',
+                          prefixIcon: const Icon(Icons.person),
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 12,
+                          ),
+                          suffixIcon: _canAddClient
+                              ? IconButton(
+                                  icon: const Icon(
+                                    Icons.add_circle,
+                                    color: Colors.blue,
+                                  ),
+                                  onPressed: _openAddClientDialog,
+                                )
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // ✅ الصف الثاني: (التاريخ + رقم الفاتورة اليدوي)
                       Row(
                         children: [
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: _clientSearchController,
-                              readOnly: true,
-                              onTap: () => _showSearchDialog(isClient: true),
-                              decoration: InputDecoration(
-                                labelText: 'العميل',
-                                prefixIcon: const Icon(Icons.person),
-                                border: const OutlineInputBorder(),
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 12,
-                                ),
-                                suffixIcon: _canAddClient
-                                    ? IconButton(
-                                        icon: const Icon(
-                                          Icons.add_circle,
-                                          color: Colors.blue,
-                                        ),
-                                        onPressed: _openAddClientDialog,
-                                      )
-                                    : null,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
+                          // 1. التاريخ
                           Expanded(
                             child: InkWell(
                               onTap: () async {
@@ -625,6 +626,10 @@ class _SalesScreenState extends State<SalesScreen> {
                               child: InputDecorator(
                                 decoration: const InputDecoration(
                                   labelText: 'التاريخ',
+                                  prefixIcon: Icon(
+                                    Icons.calendar_today,
+                                    size: 18,
+                                  ),
                                   border: OutlineInputBorder(),
                                   isDense: true,
                                   contentPadding: EdgeInsets.symmetric(
@@ -639,11 +644,32 @@ class _SalesScreenState extends State<SalesScreen> {
                               ),
                             ),
                           ),
+                          const SizedBox(width: 10),
+
+                          // 2. ✅ رقم الفاتورة اليدوي (الإضافة الجديدة)
+                          Expanded(
+                            child: TextField(
+                              controller: _refController,
+                              decoration: const InputDecoration(
+                                labelText: 'رقم الفاتورة (يدوي)',
+                                prefixIcon: Icon(Icons.receipt_long, size: 18),
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 12,
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 10),
 
-                      // إضافة منتج (Responsive Layout)
+                      const SizedBox(height: 10),
+                      const Divider(), // فاصل جمالي
+                      const SizedBox(height: 5),
+
+                      // الصف الثالث: إضافة المنتجات (كما هو بالكود القديم)
                       if (!isWide)
                         // موبايل
                         Column(
@@ -801,7 +827,6 @@ class _SalesScreenState extends State<SalesScreen> {
                 ),
               ),
             ),
-
             // 2. الجزء الأوسط (القائمة)
             SliverToBoxAdapter(
               child: _invoiceItems.isEmpty

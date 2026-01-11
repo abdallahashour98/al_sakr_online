@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/foundation.dart' show kIsWeb; // عشان نتجاهل الويب
 
 import 'services/pb_helper.dart';
 
@@ -11,8 +13,11 @@ class UpdateService {
     BuildContext context, {
     bool showNoUpdateMsg = false,
   }) async {
+    // 1. لو ويب، مفيش تحديثات بتنزل، المتصفح بيحدث نفسه
+    if (kIsWeb) return;
+
     try {
-      // 1. جلب آخر إصدار
+      // 2. جلب آخر إصدار
       final records = await PBHelper().pb
           .collection(collectionName)
           .getList(page: 1, perPage: 1, sort: '-created');
@@ -24,24 +29,47 @@ class UpdateService {
         String notes = latestData.data['release_notes'] ?? 'تحسينات عامة';
         bool isForceUpdate = latestData.data['force_update'] ?? false;
 
-        // ✅ هنا التغيير: تكوين رابط التحميل من ملف السيرفر
-        String filename = latestData.data['app_file'] ?? '';
-        String downloadUrl = "";
+        // ✅ 3. تحديد ملف التحميل بناءً على نوع الجهاز
+        String filename = "";
 
-        if (filename.isNotEmpty) {
-          // رابط ملفات بوكت بيز بيكون بالشكل ده:
-          // /api/files/COLLECTION_ID/RECORD_ID/FILENAME
-          downloadUrl =
-              "${PBHelper().pb.baseUrl}/api/files/${latestData.collectionId}/${latestData.id}/$filename";
+        if (Platform.isAndroid) {
+          filename =
+              latestData.data['file_android'] ??
+              ''; // اسم الحقل الجديد للأندرويد
+        } else if (Platform.isWindows) {
+          filename =
+              latestData.data['file_windows'] ??
+              ''; // اسم الحقل الجديد للويندوز
+        } else if (Platform.isLinux) {
+          filename =
+              latestData.data['file_linux'] ?? ''; // اسم الحقل الجديد للينكس
         }
 
-        // 2. معرفة إصدار التطبيق الحالي
+        // لو مفيش ملف مرفوع للمنصة دي، نوقف هنا (عشان مايقولش في تحديث وهو مش موجود للجهاز ده)
+        if (filename.isEmpty) {
+          if (showNoUpdateMsg && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('لا يوجد ملف تحديث متوافق مع جهازك حالياً'),
+              ),
+            );
+          }
+          return;
+        }
+
+        // تكوين الرابط
+        String downloadUrl =
+            "${PBHelper().pb.baseUrl}/api/files/${latestData.collectionId}/${latestData.id}/$filename";
+
+        // 4. معرفة إصدار التطبيق الحالي
         PackageInfo packageInfo = await PackageInfo.fromPlatform();
         String currentVersion = packageInfo.version;
 
-        print("Current: $currentVersion | Server: $serverVersion");
+        print(
+          "Device: ${Platform.operatingSystem} | Current: $currentVersion | Server: $serverVersion",
+        );
 
-        // 3. المقارنة
+        // 5. المقارنة
         if (_isNewer(serverVersion, currentVersion)) {
           if (context.mounted) {
             _showUpdateDialog(
