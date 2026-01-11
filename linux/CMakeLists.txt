@@ -7,8 +7,7 @@ project(runner LANGUAGES CXX)
 set(BINARY_NAME "al_sakr")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "com.example.al_sakr")
-
+set(APPLICATION_ID "com.alsakr.system")
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
 cmake_policy(SET CMP0063 NEW)

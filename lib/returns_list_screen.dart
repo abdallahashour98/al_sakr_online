@@ -1,5 +1,7 @@
+import 'package:al_sakr/services/pb_helper.dart';
 import 'package:flutter/material.dart';
-import 'pb_helper.dart';
+import 'services/sales_service.dart';
+import 'services/purchases_service.dart';
 
 class ReturnsListScreen extends StatefulWidget {
   final int initialIndex;
@@ -61,7 +63,7 @@ class _ClientReturnsTabState extends State<ClientReturnsTab>
 
   // ✅ 2. دالة تحميل الصلاحيات
   Future<void> _loadPermissions() async {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = SalesService().pb.authStore.record?.id;
     if (myId == null) return;
 
     if (myId == _superAdminId) {
@@ -74,7 +76,9 @@ class _ClientReturnsTabState extends State<ClientReturnsTab>
     }
 
     try {
-      final userRecord = await PBHelper().pb.collection('users').getOne(myId);
+      final userRecord = await SalesService().pb
+          .collection('users')
+          .getOne(myId);
       if (mounted) {
         setState(() {
           _canDeleteReturn = userRecord.data['allow_delete_returns'] ?? false;
@@ -104,7 +108,7 @@ class _ClientReturnsTabState extends State<ClientReturnsTab>
     }
 
     try {
-      await PBHelper().deleteReturnSafe(id);
+      await SalesService().deleteReturnSafe(id);
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -121,14 +125,16 @@ class _ClientReturnsTabState extends State<ClientReturnsTab>
   }
 
   void _showDetails(Map<String, dynamic> ret) async {
-    final items = await PBHelper().getReturnItems(ret['id']);
+    final items = await SalesService().getReturnItems(ret['id']);
     bool isCash = true;
     bool hasTax = false;
     double taxPercent = 0.0;
     double whtPercent = 0.0;
 
     if (ret['sale'] != null || ret['saleId'] != null) {
-      final sale = await PBHelper().getSaleById(ret['sale'] ?? ret['saleId']);
+      final sale = await SalesService().getSaleById(
+        ret['sale'] ?? ret['saleId'],
+      );
       if (sale != null) {
         if (sale['paymentType'] == 'credit') isCash = false;
         double saleTax = (sale['taxAmount'] as num? ?? 0).toDouble();
@@ -374,13 +380,13 @@ class _ClientReturnsTabState extends State<ClientReturnsTab>
               Navigator.pop(dialogCtx);
               try {
                 if (isClient) {
-                  await PBHelper().payReturnCash(
+                  await SalesService().payReturnCash(
                     ret['id'],
                     ret['client'] ?? ret['clientId'],
                     val,
                   );
                 } else {
-                  await PBHelper().pb
+                  await SalesService().pb
                       .collection('supplier_payments')
                       .create(
                         body: {
@@ -391,7 +397,7 @@ class _ClientReturnsTabState extends State<ClientReturnsTab>
                         },
                       );
                   double old = (ret['paidAmount'] as num? ?? 0).toDouble();
-                  await PBHelper().pb
+                  await SalesService().pb
                       .collection('purchase_returns')
                       .update(ret['id'], body: {'paidAmount': old + val});
                 }
@@ -537,7 +543,7 @@ class _SupplierReturnsTabState extends State<SupplierReturnsTab>
   }
 
   Future<void> _loadPermissions() async {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = PurchasesService().pb.authStore.record?.id;
     if (myId == null) return;
 
     if (myId == _superAdminId) {
@@ -550,7 +556,9 @@ class _SupplierReturnsTabState extends State<SupplierReturnsTab>
     }
 
     try {
-      final userRecord = await PBHelper().pb.collection('users').getOne(myId);
+      final userRecord = await PurchasesService().pb
+          .collection('users')
+          .getOne(myId);
       if (mounted) {
         setState(() {
           _canDeleteReturn = userRecord.data['allow_delete_returns'] ?? false;
@@ -586,7 +594,7 @@ class _SupplierReturnsTabState extends State<SupplierReturnsTab>
       return;
     }
     try {
-      await PBHelper().deletePurchaseReturnSafe(id);
+      await PurchasesService().deletePurchaseReturnSafe(id);
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -605,14 +613,14 @@ class _SupplierReturnsTabState extends State<SupplierReturnsTab>
   // ... (باقي الدوال انسخها من الكود السابق مع مراعاة supplier) ...
   void _showDetails(Map<String, dynamic> ret) async {
     // نفس كود العرض السابق
-    final items = await PBHelper().getPurchaseReturnItems(ret['id']);
+    final items = await PurchasesService().getPurchaseReturnItems(ret['id']);
     bool isCash = true;
     bool hasTax = false;
     double taxPercent = 0.0;
     double whtPercent = 0.0;
     String? invoiceId = ret['invoiceId'] ?? ret['purchase'];
     if (invoiceId != null) {
-      final inv = await PBHelper().getPurchaseById(invoiceId);
+      final inv = await PurchasesService().getPurchaseById(invoiceId);
       if (inv != null) {
         String pType = inv['paymentType']?.toString().toLowerCase() ?? '';
         if (pType == 'credit') isCash = false;
@@ -788,7 +796,7 @@ class _SupplierReturnsTabState extends State<SupplierReturnsTab>
               if (val <= 0 || val > maxAmount + 0.1) return;
               Navigator.pop(dialogCtx);
               try {
-                await PBHelper().pb
+                await PurchasesService().pb
                     .collection('supplier_payments')
                     .create(
                       body: {
@@ -799,7 +807,7 @@ class _SupplierReturnsTabState extends State<SupplierReturnsTab>
                       },
                     );
                 double old = (ret['paidAmount'] as num? ?? 0).toDouble();
-                await PBHelper().pb
+                await PurchasesService().pb
                     .collection('purchase_returns')
                     .update(ret['id'], body: {'paidAmount': old + val});
                 if (mounted) {

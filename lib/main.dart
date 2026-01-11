@@ -1,121 +1,90 @@
 import 'dart:async';
-import 'package:al_sakr/splash_screen.dart';
+import 'dart:io';
+import 'package:al_sakr/splash_screen.dart'; // تأكد من المسار
+import 'package:al_sakr/notices_screen.dart'; // ✅ تأكد من استيراد هذا الملف
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // ✅ تمت الإضافة
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'pb_helper.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'services/pb_helper.dart';
+import 'services/notice_service.dart';
 import 'login_screen.dart';
+import 'notification_service.dart';
+import 'background_listener.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 
-// ✅ مفاتيح التحكم العالمية
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.system);
-// ✅ 1. متغير جديد للتحكم في اللغة
 final ValueNotifier<Locale> localeNotifier = ValueNotifier(const Locale('ar'));
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  try {
-    await PBHelper().init();
-
-    // تحميل الثيم
-    final savedTheme = await PBHelper().getThemeMode();
-    themeNotifier.value = savedTheme;
-
-    // ✅ 2. تحميل اللغة المحفوظة
-    final savedLocale = await PBHelper().getLocale();
-    localeNotifier.value = savedLocale;
-  } catch (e) {
-    print("Init Error: $e");
-  }
-
-  ErrorWidget.builder = (FlutterErrorDetails details) {
-    if (details.exception.toString().contains('Connection refused') ||
-        details.exception.toString().contains('SocketException') ||
-        details.exception.toString().contains('ClientException')) {
-      return const MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: ConnectionCheckWrapper(),
+// ✅ دالة موحدة للتعامل مع الضغط على الإشعار
+void onNotificationTap(NotificationResponse details) {
+  if (details.payload == 'navigate_to_notices') {
+    if (navigatorKey.currentState != null) {
+      navigatorKey.currentState!.push(
+        MaterialPageRoute(builder: (context) => const NoticesScreen()),
       );
     }
-    return Scaffold(
-      body: Center(
-        child: Text(
-          "حدث خطأ غير متوقع!\n${details.exception}",
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.red),
-        ),
-      ),
-    );
-  };
+  }
+}
 
+void main() {
   runZonedGuarded(
-    () {
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      try {
+        if (Platform.isAndroid) await Permission.notification.request();
+
+        // 1. تهيئة خدمة الإشعارات مع دالة التوجيه
+        await NotificationService.init(
+          requestPermission: true,
+          onNotificationTap: onNotificationTap,
+        );
+
+        // 2. تهيئة PBHelper وتمرير دالة التوجيه أيضاً لضمان عدم مسحها
+        await PBHelper.init(onNotificationTap: onNotificationTap);
+
+        if (Platform.isAndroid || Platform.isIOS) {
+          // 📱 للموبايل: شغل خدمة الخلفية فقط
+          await initializeService();
+        } else {
+          // 💻 للكمبيوتر: شغل المستمع العادي فقط
+          NoticeService().startListeningToAnnouncements();
+        }
+      } catch (e) {
+        print("Error in main: $e");
+      }
       runApp(const AlSakrApp());
     },
     (error, stack) {
-      print("Global Error Caught: $error");
-      handleGlobalError(error);
+      print("Zoned Error: $error");
     },
   );
 }
 
-void handleGlobalError(Object error) {
-  String errStr = error.toString();
-  if (errStr.contains('Connection refused') ||
-      errStr.contains('ClientException') ||
-      errStr.contains('SocketException')) {
-    if (navigatorKey.currentState != null) {
-      navigatorKey.currentState!.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const ConnectionCheckWrapper()),
-        (route) => false,
-      );
-    }
-  }
-}
-
-class AlSakrApp extends StatefulWidget {
+class AlSakrApp extends StatelessWidget {
   const AlSakrApp({super.key});
 
   @override
-  State<AlSakrApp> createState() => _AlSakrAppState();
-}
-
-class _AlSakrAppState extends State<AlSakrApp> {
-  @override
-  void initState() {
-    super.initState();
-    FlutterError.onError = (FlutterErrorDetails details) {
-      FlutterError.presentError(details);
-      handleGlobalError(details.exception);
-    };
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // ✅ 3. الاستماع لتغييرات اللغة والثيم معاً
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: themeNotifier,
       builder: (context, currentTheme, _) {
         return ValueListenableBuilder<Locale>(
-          valueListenable: localeNotifier, // الاستماع للغة
+          valueListenable: localeNotifier,
           builder: (context, currentLocale, _) {
             return MaterialApp(
               navigatorKey: navigatorKey,
-              title: 'Al Sakr System',
+              title: 'Al Sakr',
               debugShowCheckedModeBanner: false,
-
-              // ✅ 4. إعدادات اللوكاليزيشن
-              locale: currentLocale, // اللغة الحالية
-              supportedLocales: const [
-                Locale('ar'), // العربية
-                Locale('en'), // الإنجليزية
-              ],
+              supportedLocales: const [Locale('ar'), Locale('en')],
               localizationsDelegates: const [
                 GlobalMaterialLocalizations.delegate,
                 GlobalWidgetsLocalizations.delegate,
                 GlobalCupertinoLocalizations.delegate,
+                FlutterQuillLocalizations.delegate,
               ],
-
+              locale: currentLocale,
               themeMode: currentTheme,
               theme: ThemeData(
                 useMaterial3: true,
@@ -129,7 +98,6 @@ class _AlSakrAppState extends State<AlSakrApp> {
                 brightness: Brightness.dark,
                 fontFamily: 'Cairo',
               ),
-
               home: const ConnectionCheckWrapper(),
             );
           },
@@ -139,8 +107,6 @@ class _AlSakrAppState extends State<AlSakrApp> {
   }
 }
 
-// ... (كلاس ConnectionCheckWrapper يفضل زي ما هو في الكود السابق)
-// انسخ كلاس ConnectionCheckWrapper من ردودي السابقة وضعه هنا
 class ConnectionCheckWrapper extends StatefulWidget {
   const ConnectionCheckWrapper({super.key});
 
@@ -164,51 +130,113 @@ class _ConnectionCheckWrapperState extends State<ConnectionCheckWrapper> {
       _isLoading = true;
       _errorMessage = '';
     });
+
     try {
-      final health = await PBHelper().pb.health.check();
+      // مهلة 5 ثواني للاتصال
+      final health = await PBHelper().pb.health.check().timeout(
+        const Duration(seconds: 5),
+      );
+
       if (health.code == 200) {
-        await PBHelper().init();
-        setState(() {
-          _isConnected = true;
-          _isLoading = false;
-        });
+        // ✅ هام جداً: عند إعادة التهيئة، نمرر دالة التوجيه مرة أخرى
+        // لكي لا يتم استبدالها بـ null ويتوقف التوجيه عن العمل
+        await PBHelper.init(onNotificationTap: onNotificationTap);
+
+        // فحص هل تم فتح التطبيق من إشعار (والتطبيق مغلق تماماً)
+        bool launchedFromNotification = false;
+        if (Platform.isAndroid || Platform.isIOS) {
+          launchedFromNotification =
+              await NotificationService.didAppLaunchFromNotification();
+        }
+
+        if (mounted) {
+          setState(() {
+            _isConnected = true;
+            _isLoading = false;
+          });
+
+          // التوجيه إذا كان التطبيق مفتوحاً بسبب إشعار
+          if (launchedFromNotification && PBHelper().isLoggedIn) {
+            // تأخير بسيط لضمان بناء الواجهة
+            Future.delayed(const Duration(milliseconds: 500), () {
+              navigatorKey.currentState?.push(
+                MaterialPageRoute(builder: (context) => const NoticesScreen()),
+              );
+            });
+          }
+        }
       }
     } catch (e) {
-      setState(() {
-        _isConnected = false;
-        _isLoading = false;
-        _errorMessage = 'السيرفر لا يستجيب.\nتأكد من تشغيل PocketBase.';
-      });
+      if (mounted) {
+        setState(() {
+          _isConnected = false;
+          _isLoading = false;
+          _errorMessage = "تعذر الاتصال بالسيرفر: $e";
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading)
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (!_isConnected) {
-      return Scaffold(
+    if (_isLoading) {
+      return const Scaffold(
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.cloud_off, size: 80, color: Colors.red),
-              const SizedBox(height: 20),
-              const Text(
-                "فشل الاتصال بالسيرفر",
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              ElevatedButton.icon(
-                onPressed: _checkServer,
-                icon: const Icon(Icons.refresh),
-                label: const Text("إعادة المحاولة"),
+              CircularProgressIndicator(),
+              SizedBox(height: 20),
+              Text(
+                "جاري الاتصال بالنظام...",
+                style: TextStyle(color: Colors.grey),
               ),
             ],
           ),
         ),
       );
     }
+
+    if (!_isConnected) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.cloud_off, size: 80, color: Colors.red),
+                const SizedBox(height: 20),
+                const Text(
+                  "فشل الاتصال بالسيرفر",
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _errorMessage,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 30),
+                ElevatedButton.icon(
+                  onPressed: _checkServer,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text("إعادة المحاولة"),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 30,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // الانتقال للشاشة المناسبة
     return PBHelper().isLoggedIn ? const SplashScreen() : const LoginScreen();
   }
 }

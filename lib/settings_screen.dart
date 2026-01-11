@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'excel_service.dart';
-import 'pb_helper.dart';
+import 'services/settings_service.dart';
+import 'services/auth_service.dart';
 import 'main.dart';
+import 'update_service.dart';
 import 'users_screen.dart';
 import 'login_screen.dart';
 
@@ -41,7 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _checkPermission() {
-    final user = PBHelper().pb.authStore.record;
+    final user = SettingsService().pb.authStore.record;
     if (user != null) {
       final myId = user.id;
       final data = user.data;
@@ -60,7 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // تحميل البيانات من الداتا بيز
   void _loadCompanyData() async {
     setState(() => _isLoading = true);
-    final data = await PBHelper().getCompanySettings();
+    final data = await SettingsService().getCompanySettings();
     if (data.isNotEmpty) {
       _companyNameController.text = data['companyName'] ?? '';
       _addressController.text = data['address'] ?? '';
@@ -75,7 +77,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveCompanyData() async {
     await _performAction(() async {
-      await PBHelper().saveCompanySettings({
+      await SettingsService().saveCompanySettings({
         'companyName':
             _companyNameController.text, // بيتحفظ زي ما هو من الداتا بيز
         'address': _addressController.text,
@@ -161,7 +163,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               onChanged: (ThemeMode? newMode) async {
                                 if (newMode != null) {
                                   themeNotifier.value = newMode;
-                                  await PBHelper().saveThemeMode(newMode);
+                                  await SettingsService().saveThemeMode(
+                                    newMode,
+                                  );
                                 }
                               },
                             ),
@@ -209,7 +213,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               onChanged: (String? newLang) async {
                                 if (newLang != null) {
                                   localeNotifier.value = Locale(newLang);
-                                  await PBHelper().saveLocale(newLang);
+                                  await SettingsService().saveLocale(newLang);
                                 }
                               },
                             ),
@@ -387,6 +391,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 30),
                     const Divider(),
                     const SizedBox(height: 20),
+                    // داخل الـ build في المكان اللي تحبه
+                    ListTile(
+                      leading: const Icon(
+                        Icons.system_update,
+                        color: Colors.blue,
+                      ),
+                      title: const Text("التحقق من التحديثات"),
+                      onTap: () {
+                        // هنا بنبعت true عشان لو مفيش تحديث يطلع رسالة "أنت على آخر إصدار"
+                        UpdateService().checkForUpdate(
+                          context,
+                          showNoUpdateMsg: true,
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 30),
+                    const Divider(),
+                    const SizedBox(height: 20),
                   ],
 
                   // 4. الحساب والأمان
@@ -449,7 +471,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       foregroundColor: Colors.white,
                                     ),
                                     onPressed: () {
-                                      PBHelper().logout();
+                                      AuthService().logout();
                                       Navigator.pop(ctx);
                                       Navigator.pushAndRemoveUntil(
                                         context,

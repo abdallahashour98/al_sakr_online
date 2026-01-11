@@ -1,11 +1,16 @@
 import 'dart:io';
+import 'package:al_sakr/services/pb_helper.dart';
 import 'package:excel/excel.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'pb_helper.dart'; // ✅ استبدال db_helper
 
+import 'services/inventory_service.dart';
+import 'services/purchases_service.dart';
+import 'services/sales_service.dart';
+
+// ... وهكذا
 class ExcelService {
   final pbHelper = PBHelper();
 
@@ -21,7 +26,7 @@ class ExcelService {
       _addSheet(
         excel,
         'المخزن',
-        await pbHelper.getProducts(),
+        await InventoryService().getProducts(),
         [
           'id', // ده أصبح نص دلوقتي (String)
           'name',
@@ -48,7 +53,7 @@ class ExcelService {
       _addSheet(
         excel,
         'سجل المبيعات',
-        await pbHelper.getSales(), // ✅ دالة جديدة
+        await SalesService().getSales(), // ✅ دالة جديدة
         [
           'id',
           'clientName', // بيجي من expand في PBHelper
@@ -73,7 +78,7 @@ class ExcelService {
       _addSheet(
         excel,
         'مرتجعات العملاء',
-        await pbHelper.getReturns(), // ✅ دالة جديدة
+        await SalesService().getReturns(), // ✅ دالة جديدة
         ['id', 'sale', 'clientName', 'totalAmount', 'date'],
         [
           'رقم المرتجع',
@@ -88,7 +93,7 @@ class ExcelService {
       _addSheet(
         excel,
         'سجل المشتريات',
-        await pbHelper.getPurchases(), // ✅ دالة جديدة
+        await PurchasesService().getPurchases(), // ✅ دالة جديدة
         [
           'id',
           'supplierName',
@@ -111,7 +116,7 @@ class ExcelService {
       _addSheet(
         excel,
         'حسابات العملاء',
-        await pbHelper.getClients(),
+        await SalesService().getClients(),
         ['id', 'name', 'phone', 'address', 'balance'],
         ['ID', 'اسم العميل', 'رقم الهاتف', 'العنوان', 'المديونية الحالية'],
       );
@@ -120,7 +125,7 @@ class ExcelService {
       _addSheet(
         excel,
         'حسابات الموردين',
-        await pbHelper.getSuppliers(),
+        await PurchasesService().getSuppliers(),
         ['id', 'name', 'phone', 'contactPerson', 'balance'],
         ['ID', 'اسم المورد', 'رقم الهاتف', 'المسئول', 'المديونية الحالية'],
       );
@@ -129,7 +134,7 @@ class ExcelService {
       _addSheet(
         excel,
         'المصروفات',
-        await pbHelper.getExpenses(),
+        await PurchasesService().getExpenses(),
         ['id', 'title', 'amount', 'category', 'date', 'notes'],
         ['ID', 'البند', 'المبلغ', 'التصنيف', 'التاريخ', 'ملاحظات'],
       );

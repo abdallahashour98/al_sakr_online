@@ -1,6 +1,7 @@
 import 'dart:io';
+import 'package:al_sakr/services/inventory_service.dart';
+import 'package:al_sakr/services/pb_helper.dart';
 import 'package:flutter/material.dart';
-import 'pb_helper.dart';
 import 'product_history_screen.dart';
 import 'product_dialog.dart';
 
@@ -15,26 +16,23 @@ class _StoreScreenState extends State<StoreScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _filterType = 'all';
 
-  // ✅ 1. تعريف متغيرات الصلاحيات داخل الكلاس
+  // متغيرات الصلاحيات
   bool _canAdd = false;
   bool _canEdit = false;
   bool _canDelete = false;
 
-  // الآيدي الخاص بالسوبر أدمن
   final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
-    _loadPermissions(); // ✅ فحص الصلاحيات عند الفتح
+    _loadPermissions();
   }
 
-  // ✅ 2. دالة تحميل الصلاحيات من الداتا بيز
   Future<void> _loadPermissions() async {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = InventoryService().pb.authStore.record?.id;
     if (myId == null) return;
 
-    // لو أنا السوبر أدمن -> كل حاجة مسموحة
     if (myId == _superAdminId) {
       if (mounted) {
         setState(() {
@@ -46,9 +44,10 @@ class _StoreScreenState extends State<StoreScreen> {
       return;
     }
 
-    // لو يوزر عادي -> نجيب صلاحياته
     try {
-      final userRecord = await PBHelper().pb.collection('users').getOne(myId);
+      final userRecord = await InventoryService().pb
+          .collection('users')
+          .getOne(myId);
       if (mounted) {
         setState(() {
           _canAdd = userRecord.data['allow_add_products'] ?? false;
@@ -79,7 +78,6 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   void _openProductDialog({Map<String, dynamic>? product}) async {
-    // حماية إضافية: لو يحاول يفتح ديالوج وهو ممنوع
     if (product == null && !_canAdd) return;
     if (product != null && !_canEdit) return;
 
@@ -91,7 +89,7 @@ class _StoreScreenState extends State<StoreScreen> {
   }
 
   void _deleteProduct(String id) {
-    if (!_canDelete) return; // حماية
+    if (!_canDelete) return;
 
     showDialog(
       context: context,
@@ -106,7 +104,7 @@ class _StoreScreenState extends State<StoreScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await PBHelper().deleteProduct(id);
+              await InventoryService().deleteProduct(id);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -293,10 +291,12 @@ class _StoreScreenState extends State<StoreScreen> {
                 expand: 'supplier',
               ),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting)
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
-                if (snapshot.hasError)
+                }
+                if (snapshot.hasError) {
                   return const Center(child: Text("خطأ في الاتصال"));
+                }
 
                 final allProducts = snapshot.data ?? [];
 
@@ -315,10 +315,12 @@ class _StoreScreenState extends State<StoreScreen> {
 
                   if (!matchesSearch) return false;
 
-                  if (_filterType == 'expired')
+                  if (_filterType == 'expired') {
                     return _checkExpiryStatus(product) == 1;
-                  if (_filterType == 'near_expiry')
+                  }
+                  if (_filterType == 'near_expiry') {
                     return _checkExpiryStatus(product) == 2;
+                  }
                   if (_filterType == 'low_stock') {
                     int stock = (product['stock'] as num).toInt();
                     int reorder =
@@ -333,8 +335,9 @@ class _StoreScreenState extends State<StoreScreen> {
                   return true;
                 }).toList();
 
-                if (filteredList.isEmpty)
+                if (filteredList.isEmpty) {
                   return const Center(child: Text('لا توجد أصناف'));
+                }
 
                 return ListView.builder(
                   padding: const EdgeInsets.only(
@@ -353,7 +356,6 @@ class _StoreScreenState extends State<StoreScreen> {
           ),
         ],
       ),
-      // ✅ 3. إخفاء زر الإضافة لو مفيش صلاحية
       floatingActionButton: _canAdd
           ? FloatingActionButton.extended(
               onPressed: () => _openProductDialog(),
@@ -368,6 +370,7 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
+  // ✅✅ الدالة المعدلة جذرياً لحل مشكلة الاوفر فلو ✅✅
   Widget _buildProductCard(Map<String, dynamic> product, bool isDark) {
     int stock = (product['stock'] as num).toInt();
     int reorder = (product['reorderLevel'] as num?)?.toInt() ?? 0;
@@ -403,113 +406,235 @@ class _StoreScreenState extends State<StoreScreen> {
       }
     }
 
+    // ✅ التصميم الجديد: Custom Card بدلاً من ListTile
     return Card(
-      color: cardColor,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        leading: GestureDetector(
-          onTap: listImageProvider != null
-              ? () => _showZoomedImage(product['imagePath'])
-              : null,
-          child: CircleAvatar(
-            backgroundColor: statusText.isNotEmpty
-                ? statusColor.withOpacity(0.2)
-                : Colors.blue.withOpacity(0.1),
-            backgroundImage: listImageProvider,
-            child: listImageProvider == null
-                ? Icon(
-                    expiryStatus == 1
-                        ? Icons.warning
-                        : (isLowStock
-                              ? Icons.trending_down
-                              : Icons.inventory_2),
-                    color: statusText.isNotEmpty ? statusColor : Colors.blue,
-                  )
-                : null,
-          ),
-        ),
-        title: Row(
+      color: cardColor ?? (isDark ? const Color(0xFF2C2C2C) : Colors.white),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
           children: [
-            Expanded(
-              child: Text(
-                product['name'],
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-            if (statusText.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: statusColor,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  statusText,
-                  style: const TextStyle(color: Colors.white, fontSize: 10),
-                ),
-              ),
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
+            // 1. الصف العلوي: الصورة + البيانات
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'سعر: ${product['sellPrice']}',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.greenAccent : Colors.green,
+                // الصورة
+                GestureDetector(
+                  onTap: listImageProvider != null
+                      ? () => _showZoomedImage(product['imagePath'])
+                      : null,
+                  child: Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: statusText.isNotEmpty
+                          ? statusColor.withOpacity(0.2)
+                          : Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      image: listImageProvider != null
+                          ? DecorationImage(
+                              image: listImageProvider,
+                              fit: BoxFit.cover,
+                            )
+                          : null,
+                    ),
+                    child: listImageProvider == null
+                        ? Icon(
+                            expiryStatus == 1
+                                ? Icons.warning
+                                : (isLowStock
+                                      ? Icons.trending_down
+                                      : Icons.inventory_2),
+                            color: statusText.isNotEmpty
+                                ? statusColor
+                                : Colors.blue,
+                            size: 30,
+                          )
+                        : null,
                   ),
                 ),
-                const SizedBox(width: 15),
-                Text(
-                  'رصيد: $stock',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                const SizedBox(width: 12),
+
+                // البيانات (الاسم، الحالة، السعر، المخزون)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // الاسم والبادج
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              product['name'],
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                              maxLines: 2, // يسمح بسطرين
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (statusText.isNotEmpty)
+                            Container(
+                              margin: const EdgeInsets.only(right: 5),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: statusColor,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                statusText,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+
+                      // السعر والمخزون (باستخدام Wrap لتجنب الاوفر فلو)
+                      Wrap(
+                        spacing: 15,
+                        runSpacing: 5,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.sell_outlined,
+                                size: 14,
+                                color: isDark
+                                    ? Colors.greenAccent
+                                    : Colors.green,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${product['sellPrice']}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark
+                                      ? Colors.greenAccent
+                                      : Colors.green,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.inventory_2_outlined,
+                                size: 14,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '$stock',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (damaged > 0)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.broken_image_outlined,
+                                  size: 14,
+                                  color: Colors.red,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$damaged',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red,
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                if (damaged > 0) ...[
-                  const SizedBox(width: 15),
-                  Text(
-                    'تالف: $damaged',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.red,
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            const Divider(height: 1), // فاصل خفيف
+            // 2. الصف السفلي: أزرار الإجراءات
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround, // توزيع متساوي
+              children: [
+                _buildActionButton(
+                  icon: Icons.history,
+                  label: "سجل",
+                  color: Colors.teal,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ProductHistoryScreen(product: product),
                     ),
                   ),
-                ],
+                ),
+                if (_canEdit)
+                  _buildActionButton(
+                    icon: Icons.edit,
+                    label: "تعديل",
+                    color: Colors.blue,
+                    onTap: () => _openProductDialog(product: product),
+                  ),
+                if (_canDelete)
+                  _buildActionButton(
+                    icon: Icons.delete,
+                    label: "حذف",
+                    color: Colors.red,
+                    onTap: () => _deleteProduct(product['id']),
+                  ),
               ],
             ),
           ],
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+      ),
+    );
+  }
+
+  // ودجت صغيرة للأزرار السفلية
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        child: Row(
           children: [
-            // سجل الحركة (متاح دائماً لمن يرى الشاشة)
-            IconButton(
-              icon: const Icon(Icons.history, color: Colors.teal),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ProductHistoryScreen(product: product),
-                ),
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
               ),
             ),
-
-            // ✅ 4. زر التعديل (يظهر فقط لو مسموح)
-            if (_canEdit)
-              IconButton(
-                icon: const Icon(Icons.edit, color: Colors.blue),
-                onPressed: () => _openProductDialog(product: product),
-              ),
-
-            // ✅ 5. زر الحذف (يظهر فقط لو مسموح)
-            if (_canDelete)
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
-                onPressed: () => _deleteProduct(product['id']),
-              ),
           ],
         ),
       ),

@@ -1,8 +1,8 @@
 import 'dart:async';
+import 'package:al_sakr/services/sales_service.dart';
 import 'package:flutter/material.dart';
 import 'dashboard.dart'; // تأكد أن ملف الداشبورد موجود
 import 'login_screen.dart';
-import 'pb_helper.dart'; // ✅ لازم نستدعي الـ Helper عشان نفحص الدخول
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -27,7 +27,7 @@ class _SplashScreenState extends State<SplashScreen> {
       // ✅ هنا الفحص السحري:
       // PBHelper بيحمل التوكن من SharedPreferences أوتوماتيك في main.dart
       // فاحنا بس بنسأله: هل التوكن ده لسه شغال؟
-      bool isLoggedIn = PBHelper().pb.authStore.isValid;
+      bool isLoggedIn = SalesService().pb.authStore.isValid;
 
       if (isLoggedIn) {
         // لو مسجل دخول، روح للداشبورد علطول

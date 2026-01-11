@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'pb_helper.dart';
+import 'services/auth_service.dart';
 
 class UsersScreen extends StatefulWidget {
   const UsersScreen({super.key});
@@ -27,7 +27,7 @@ class _UsersScreenState extends State<UsersScreen> {
 
   // فحص هل أنا أملك صلاحية إدارة المستخدمين
   void _checkMyPermissions() {
-    final user = PBHelper().pb.authStore.record;
+    final user = AuthService().pb.authStore.record;
     if (user != null) {
       setState(() {
         _iCanManagePermissions =
@@ -40,7 +40,7 @@ class _UsersScreenState extends State<UsersScreen> {
   Future<void> _loadUsers() async {
     setState(() => _isLoading = true);
     try {
-      final users = await PBHelper().getUsers();
+      final users = await AuthService().getUsers();
       if (mounted) {
         setState(() {
           _users = users;
@@ -155,7 +155,7 @@ class _UsersScreenState extends State<UsersScreen> {
                   // دمج الاسم مع الدومين
                   String finalEmail = "$inputUserPart$fixedDomain";
 
-                  await PBHelper().createUser(
+                  await AuthService().createUser(
                     inputName,
                     finalEmail,
                     passCtrl.text,
@@ -484,7 +484,7 @@ class _UsersScreenState extends State<UsersScreen> {
               ),
               ElevatedButton(
                 onPressed: () async {
-                  await PBHelper().updateUser(user['id'], perms);
+                  await AuthService().updateUser(user['id'], perms);
                   if (mounted) {
                     Navigator.pop(ctx);
                     _loadUsers();
@@ -621,7 +621,7 @@ class _UsersScreenState extends State<UsersScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              await PBHelper().updateUser(user['id'], {
+              await AuthService().updateUser(user['id'], {
                 'name': nameCtrl.text,
                 'role': isTargetSuperAdmin ? 'admin' : role,
               });
@@ -658,7 +658,7 @@ class _UsersScreenState extends State<UsersScreen> {
           ElevatedButton(
             onPressed: () async {
               if (c.text.length < 5) return;
-              await PBHelper().updateUserPassword(userId, c.text);
+              await AuthService().updateUserPassword(userId, c.text);
               if (mounted) {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(
@@ -690,7 +690,7 @@ class _UsersScreenState extends State<UsersScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              await PBHelper().deleteUser(id);
+              await AuthService().deleteUser(id);
               if (mounted) {
                 Navigator.pop(ctx);
                 _loadUsers();
@@ -705,7 +705,7 @@ class _UsersScreenState extends State<UsersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = PBHelper().pb.authStore.record;
+    final currentUser = AuthService().pb.authStore.record;
     final myId = currentUser?.id;
     final bool amISuperAdmin = (myId == _superAdminId);
 

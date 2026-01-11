@@ -36,7 +36,7 @@ dependencies:
     # أدوات قاعدة البيانات
   # sqflite: ^2.3.0
   # sqflite_common_ffi: ^2.3.0
-  pocketbase: ^0.19.0
+  pocketbase: ^0.23.1
   path: ^1.8.3
   share_plus: ^7.2.1      # عشان نشارك ملف الداتا بيز
   file_picker: ^8.0.0     # عشان نختار ملف الباك اب من الموبايل
@@ -46,9 +46,10 @@ dependencies:
   image_picker: ^1.0.4
   archive: ^3.6.1
   cupertino_icons: ^1.0.8
-  sentry_flutter: ^9.9.1
+  #sentry_flutter: ^8.0.0
   msix: ^3.16.1
   firebase_database: ^11.0.0
+  firebase_core: ^3.15.2
   package_info_plus: ^8.0.0
   url_launcher: ^6.3.0
   sqlite3_flutter_libs: ^0.5.20
@@ -62,6 +63,15 @@ dependencies:
   syncfusion_flutter_core: ^24.1.41
   arabic_reshaper: ^0.0.1
   provider: ^6.0.0
+  flutter_quill: ^11.5.0
+  flutter_local_notifications: ^19.5.0
+  flutter_background_service: ^5.0.0 # عشان يشتغل في الخلفية (للأندرويد)
+  badges: ^3.1.2
+  firebase_messaging: ^15.2.10
+  googleapis_auth: ^1.4.1  # 👈 ضف هذا السطر
+  
+
+  
 
   
 
@@ -79,15 +89,15 @@ dev_dependencies:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/icon.png"
+  image_path: "assets/splash_logo.png"
   min_sdk_android: 21
   windows:
     generate: true
     icon_size: 48
-    image_path: "assets/icon.png"
+    image_path: "assets/splash_logo.png"
   linux:
     generate: true
-    image_path: "assets/icon.png"
+    image_path: "assets/splash_logo.png"
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

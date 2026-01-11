@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'pb_helper.dart'; // ✅ استخدام مكتبة PocketBase
+
+import 'services/purchases_service.dart';
 
 class SupplierStatementScreen extends StatefulWidget {
   const SupplierStatementScreen({super.key});
@@ -30,7 +31,7 @@ class _SupplierStatementScreenState extends State<SupplierStatementScreen> {
 
   // 1. تحميل قائمة الموردين
   void _loadSuppliers() async {
-    final data = await PBHelper().getSuppliers();
+    final data = await PurchasesService().getSuppliers();
     setState(() {
       _suppliers = data;
     });
@@ -39,14 +40,14 @@ class _SupplierStatementScreenState extends State<SupplierStatementScreen> {
   // 2. تحميل كشف الحساب
   void _loadStatement(String supplierId) async {
     // أ. جلب الحركات (فواتير، دفعات، مرتجعات) في الفترة
-    final data = await PBHelper().getSupplierStatement(
+    final data = await PurchasesService().getSupplierStatement(
       supplierId,
       startDate: _startDate,
       endDate: _endDate,
     );
 
     // ب. جلب الرصيد الافتتاحي للمورد
-    double openingBalance = await PBHelper().getSupplierOpeningBalance(
+    double openingBalance = await PurchasesService().getSupplierOpeningBalance(
       supplierId,
     );
 
@@ -88,7 +89,7 @@ class _SupplierStatementScreenState extends State<SupplierStatementScreen> {
 
   // 3. عرض تفاصيل الفاتورة
   void _showInvoiceDetails(String invoiceId, String title) async {
-    final items = await PBHelper().getPurchaseItems(invoiceId);
+    final items = await PurchasesService().getPurchaseItems(invoiceId);
     if (!mounted) return;
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -305,7 +306,7 @@ class _SupplierStatementScreenState extends State<SupplierStatementScreen> {
                       String finalNotes =
                           "($methodText) ${refController.text} ${notesController.text}";
 
-                      await PBHelper().addSupplierPayment(
+                      await PurchasesService().addSupplierPayment(
                         supplierId: _selectedSupplierId!,
                         amount: double.parse(amountController.text),
                         notes: finalNotes,
@@ -346,7 +347,7 @@ class _SupplierStatementScreenState extends State<SupplierStatementScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await PBHelper().deleteSupplierPayment(
+              await PurchasesService().deleteSupplierPayment(
                 id,
                 _selectedSupplierId!,
                 amount,

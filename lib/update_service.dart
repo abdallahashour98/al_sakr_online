@@ -1,63 +1,83 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http; // 👈 المكتبة الجديدة
-import 'dart:convert'; // 👈 عشان نفك تشفير البيانات الراجعة
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'services/pb_helper.dart';
+
 class UpdateService {
-  // 👇 1. ضع رابط قاعدة البيانات الخاص بك هنا
-  // هتلاقيه في الفايربيس كونسول في صفحة Realtime Database من فوق
-  // ومهم جداً تزود في آخره كلمة ".json"
-  final String databaseUrl =
-      "https://al-sakr-default-rtdb.firebaseio.com/app_update.json";
+  final String collectionName = 'app_versions';
 
-  Future<void> checkForUpdate(BuildContext context) async {
+  Future<void> checkForUpdate(
+    BuildContext context, {
+    bool showNoUpdateMsg = false,
+  }) async {
     try {
-      // 2. قراءة البيانات باستخدام رابط إنترنت عادي (يعمل على الويندوز والكل)
-      final response = await http.get(Uri.parse(databaseUrl));
+      // 1. جلب آخر إصدار
+      final records = await PBHelper().pb
+          .collection(collectionName)
+          .getList(page: 1, perPage: 1, sort: '-created');
 
-      if (response.statusCode == 200 && response.body.isNotEmpty) {
-        // تحويل النص الراجع إلى Map
-        final data = json.decode(response.body);
+      if (records.items.isNotEmpty) {
+        final latestData = records.items.first;
 
-        // التحقق أن البيانات ليست فارغة (null)
-        if (data != null) {
-          String serverVersion = data['latest_version'].toString();
-          String downloadUrl = data['download_url'].toString();
-          String notes =
-              data['release_notes'] ?? 'تحديث جديد متاح لتحسين الأداء';
+        String serverVersion = latestData.data['version'] ?? '1.0.0';
+        String notes = latestData.data['release_notes'] ?? 'تحسينات عامة';
+        bool isForceUpdate = latestData.data['force_update'] ?? false;
 
-          // 3. معرفة إصدار التطبيق الحالي
-          PackageInfo packageInfo = await PackageInfo.fromPlatform();
-          String currentVersion = packageInfo.version;
+        // ✅ هنا التغيير: تكوين رابط التحميل من ملف السيرفر
+        String filename = latestData.data['app_file'] ?? '';
+        String downloadUrl = "";
 
-          print("Current: $currentVersion | Server: $serverVersion");
+        if (filename.isNotEmpty) {
+          // رابط ملفات بوكت بيز بيكون بالشكل ده:
+          // /api/files/COLLECTION_ID/RECORD_ID/FILENAME
+          downloadUrl =
+              "${PBHelper().pb.baseUrl}/api/files/${latestData.collectionId}/${latestData.id}/$filename";
+        }
 
-          // 4. المقارنة
-          if (_isNewer(serverVersion, currentVersion)) {
-            if (context.mounted) {
-              _showUpdateDialog(context, serverVersion, notes, downloadUrl);
-            }
-          } else {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('البرنامج محدث لآخر إصدار ✅'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            }
+        // 2. معرفة إصدار التطبيق الحالي
+        PackageInfo packageInfo = await PackageInfo.fromPlatform();
+        String currentVersion = packageInfo.version;
+
+        print("Current: $currentVersion | Server: $serverVersion");
+
+        // 3. المقارنة
+        if (_isNewer(serverVersion, currentVersion)) {
+          if (context.mounted) {
+            _showUpdateDialog(
+              context,
+              serverVersion,
+              notes,
+              downloadUrl,
+              isForceUpdate,
+            );
+          }
+        } else {
+          if (showNoUpdateMsg && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('البرنامج محدث لآخر إصدار ✅'),
+                backgroundColor: Colors.green,
+              ),
+            );
           }
         }
       } else {
-        throw "فشل الاتصال بقاعدة البيانات (Status: ${response.statusCode})";
+        if (showNoUpdateMsg && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('لا توجد معلومات عن تحديثات مسجلة حالياً'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
       }
     } catch (e) {
       print("Error checking update: $e");
-      if (context.mounted) {
+      if (showNoUpdateMsg && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('فشل التحقق من التحديثات: $e'),
+            content: Text('فشل التحقق: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -66,7 +86,20 @@ class UpdateService {
   }
 
   bool _isNewer(String server, String current) {
-    return server != current;
+    try {
+      List<int> s = server.split('.').map(int.parse).toList();
+      List<int> c = current.split('.').map(int.parse).toList();
+
+      for (int i = 0; i < 3; i++) {
+        int sPart = i < s.length ? s[i] : 0;
+        int cPart = i < c.length ? c[i] : 0;
+        if (sPart > cPart) return true;
+        if (sPart < cPart) return false;
+      }
+      return false;
+    } catch (e) {
+      return server != current;
+    }
   }
 
   void _showUpdateDialog(
@@ -74,58 +107,77 @@ class UpdateService {
     String version,
     String notes,
     String url,
+    bool isForce,
   ) {
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.system_update, color: Colors.blue),
-            SizedBox(width: 10),
-            Text('تحديث جديد متاح'),
+      barrierDismissible: !isForce,
+      builder: (ctx) => WillPopScope(
+        onWillPop: () async => !isForce,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          title: Row(
+            children: [
+              Icon(
+                isForce ? Icons.warning_amber_rounded : Icons.system_update,
+                color: isForce ? Colors.red : Colors.blue,
+              ),
+              const SizedBox(width: 10),
+              Text(isForce ? 'تحديث إجباري مطلوب' : 'تحديث جديد متاح'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'الإصدار: $version',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'أبرز التغييرات:',
+                style: TextStyle(color: Colors.grey),
+              ),
+              Text(notes),
+              const SizedBox(height: 20),
+              if (isForce)
+                const Text(
+                  '⚠️ هذا التحديث ضروري لاستمرار عمل التطبيق.',
+                  style: TextStyle(color: Colors.red, fontSize: 12),
+                ),
+            ],
+          ),
+          actions: [
+            if (!isForce)
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('لاحقاً'),
+              ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.download, color: Colors.white, size: 18),
+              onPressed: () {
+                if (!isForce) Navigator.pop(ctx);
+                _launchDownloadUrl(url);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isForce ? Colors.red : Colors.blue,
+              ),
+              label: const Text(
+                'تحميل وتثبيت',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'الإصدار الجديد: $version',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            const Text('ما الجديد:'),
-            Text(notes),
-            const SizedBox(height: 20),
-            const Text(
-              'سيتم فتح المتصفح لتحميل التحديث.\nيرجى تحميل الملف وتثبيته.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('لاحقاً'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _launchDownloadUrl(url);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-            child: const Text(
-              'تحميل التحديث',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
       ),
     );
   }
 
   Future<void> _launchDownloadUrl(String url) async {
+    if (url.isEmpty) return;
     final Uri uri = Uri.parse(url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       throw 'Could not launch $url';

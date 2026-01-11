@@ -1,5 +1,5 @@
+import 'package:al_sakr/services/inventory_service.dart';
 import 'package:flutter/material.dart';
-import 'pb_helper.dart'; // ✅ استبدال المكتبة
 
 class ProductHistoryScreen extends StatefulWidget {
   final Map<String, dynamic> product;
@@ -21,7 +21,9 @@ class _ProductHistoryScreenState extends State<ProductHistoryScreen> {
 
   void _loadHistory() async {
     // ✅ الـ ID أصبح String ويتم جلبه من PBHelper
-    final data = await PBHelper().getProductHistory(widget.product['id']);
+    final data = await InventoryService().getProductHistory(
+      widget.product['id'],
+    );
     if (mounted) {
       setState(() {
         _history = data;

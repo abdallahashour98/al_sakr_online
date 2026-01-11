@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'pb_helper.dart';
+import 'services/reports_service.dart';
 
 // تأكد من وجود هذه الملفات أو علق الاستدعاءات التي لا تحتاجها
 import 'store_screen.dart';
@@ -7,7 +7,7 @@ import 'suppliers_screen.dart';
 import 'clients_screen.dart';
 // افترضت وجود شاشة لسجل المشتريات
 import 'expenses_screen.dart';
-import 'returns_list_screen.dart'; // ✅ تم التفعيل
+import 'returns_list_screen.dart';
 
 class GeneralReportsScreen extends StatefulWidget {
   const GeneralReportsScreen({super.key});
@@ -29,7 +29,7 @@ class _GeneralReportsScreenState extends State<GeneralReportsScreen> {
   Future<void> _loadReportData() async {
     setState(() => _isLoading = true);
     // جلب البيانات الحقيقية من السيرفر
-    final data = await PBHelper().getGeneralReportData();
+    final data = await ReportsService().getGeneralReportData();
     if (mounted) {
       setState(() {
         _data = data;
@@ -53,8 +53,8 @@ class _GeneralReportsScreenState extends State<GeneralReportsScreen> {
 
     // 1. استخراج الأرقام (مع الحماية من null)
     double sales = _data['monthlySales'] ?? 0.0;
-    double clientReturns = _data['clientReturns'] ?? 0.0; // ✅
-    double supplierReturns = _data['supplierReturns'] ?? 0.0; // ✅
+    double clientReturns = _data['clientReturns'] ?? 0.0;
+    double supplierReturns = _data['supplierReturns'] ?? 0.0;
     double returns = _data['monthlyReturns'] ?? 0.0;
     double expenses = _data['monthlyExpenses'] ?? 0.0;
     double supplierPayments = _data['monthlyPayments'] ?? 0.0;
@@ -63,8 +63,6 @@ class _GeneralReportsScreenState extends State<GeneralReportsScreen> {
     // 2. الحسابات المشتقة
     double netSales = sales - returns; // صافي المبيعات
     // صافي السيولة = (اللي دخل) - (اللي خرج)
-    // اللي دخل: صافي المبيعات (بافتراض التحصيل)
-    // اللي خرج: مصاريف + مدفوعات موردين
     double netCashFlow = netSales - (expenses + supplierPayments);
 
     return Scaffold(
@@ -80,170 +78,186 @@ class _GeneralReportsScreenState extends State<GeneralReportsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadReportData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // ================= القسم الأول: السيولة (الشهر الحالي) =================
-                    _buildSectionHeader("حركة السيولة (الشهر الحالي)"),
-                    Container(
-                      padding: const EdgeInsets.all(15),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.grey[900] : Colors.blue[50],
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                      ),
+          : SafeArea(
+              child: RefreshIndicator(
+                onRefresh: _loadReportData,
+                child: Center(
+                  // ✅ توسيط المحتوى للشاشات الكبيرة
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: 1000,
+                    ), // ✅ تحديد أقصى عرض
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(16),
                       child: Column(
                         children: [
-                          _buildCashRow(
-                            "صافي المبيعات (إيراد)",
-                            netSales,
-                            Colors.green,
-                          ),
-                          const Divider(),
-                          _buildCashRow(
-                            "مصاريف تشغيل (خرج)",
-                            -expenses,
-                            Colors.red,
-                          ),
-                          _buildCashRow(
-                            "مدفوعات موردين (خرج)",
-                            -supplierPayments,
-                            Colors.orange[800]!,
-                          ),
-                          const Divider(thickness: 2),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                "صافي السيولة :",
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
+                          // ================= القسم الأول: السيولة (الشهر الحالي) =================
+                          _buildSectionHeader("حركة السيولة (الشهر الحالي)"),
+                          Container(
+                            padding: const EdgeInsets.all(15),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.grey[900]
+                                  : Colors.blue[50],
+                              borderRadius: BorderRadius.circular(15),
+                              border: Border.all(
+                                color: Colors.blue.withOpacity(0.3),
                               ),
-                              Text(
-                                "${netCashFlow.toStringAsFixed(1)} ج.م",
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: netCashFlow >= 0
-                                      ? Colors.green
-                                      : Colors.red,
+                            ),
+                            child: Column(
+                              children: [
+                                _buildCashRow(
+                                  "صافي المبيعات (إيراد)",
+                                  netSales,
+                                  Colors.green,
+                                ),
+                                const Divider(),
+                                _buildCashRow(
+                                  "مصاريف تشغيل (خرج)",
+                                  -expenses,
+                                  Colors.red,
+                                ),
+                                _buildCashRow(
+                                  "مدفوعات موردين (خرج)",
+                                  -supplierPayments,
+                                  Colors.orange[800]!,
+                                ),
+                                const Divider(thickness: 2),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text(
+                                      "صافي السيولة :",
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    Text(
+                                      "${netCashFlow.toStringAsFixed(1)} ج.م",
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: netCashFlow >= 0
+                                            ? Colors.green
+                                            : Colors.red,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 25),
+
+                          // ================= القسم الثاني: النشاط التجاري =================
+                          _buildSectionHeader("النشاط التجاري (الشهر الحالي)"),
+
+                          _buildListTileCard(
+                            "إجمالي المبيعات",
+                            sales,
+                            Icons.point_of_sale,
+                            Colors.teal,
+                            cardBg,
+                            textColor,
+                            () {},
+                          ),
+                          _buildListTileCard(
+                            "إجمالي فواتير الشراء",
+                            purchasesBills,
+                            Icons.inventory,
+                            Colors.blue,
+                            cardBg,
+                            textColor,
+                            () {},
+                          ),
+                          _buildListTileCard(
+                            "مرتجعات العملاء",
+                            -clientReturns, // بالسالب للتوضيح
+                            Icons.assignment_return,
+                            Colors.deepPurple,
+                            cardBg,
+                            textColor,
+                            () => _navigateTo(
+                              const ReturnsListScreen(initialIndex: 0),
+                            ),
+                          ),
+
+                          _buildListTileCard(
+                            "مرتجعات الموردين",
+                            -supplierReturns, // بالسالب للتوضيح
+                            Icons.unarchive,
+                            Colors.orange,
+                            cardBg,
+                            textColor,
+                            () => _navigateTo(
+                              const ReturnsListScreen(initialIndex: 1),
+                            ),
+                          ),
+                          _buildListTileCard(
+                            "المصروفات",
+                            -expenses,
+                            Icons.money_off,
+                            Colors.redAccent,
+                            cardBg,
+                            textColor,
+                            () => _navigateTo(const ExpensesScreen()),
+                          ),
+
+                          const SizedBox(height: 25),
+
+                          // ================= القسم الثالث: المركز المالي =================
+                          _buildSectionHeader(
+                            "المركز المالي (الأرصدة الحالية)",
+                          ),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildSummaryCard(
+                                  "قيمة المخزون",
+                                  _data['inventory'] ?? 0,
+                                  Icons.store,
+                                  Colors.blue,
+                                  isDark,
+                                  () => _navigateTo(const StoreScreen()),
                                 ),
                               ),
                             ],
                           ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildSummaryCard(
+                                  "لنا عند العملاء",
+                                  _data['receivables'] ?? 0,
+                                  Icons.account_balance_wallet,
+                                  Colors.green,
+                                  isDark,
+                                  () => _navigateTo(const ClientsScreen()),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _buildSummaryCard(
+                                  "علينا للموردين",
+                                  _data['payables'] ?? 0,
+                                  Icons.money_off,
+                                  Colors.red,
+                                  isDark,
+                                  () => _navigateTo(const SuppliersScreen()),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
                         ],
                       ),
                     ),
-
-                    const SizedBox(height: 25),
-
-                    // ================= القسم الثاني: النشاط التجاري =================
-                    _buildSectionHeader("النشاط التجاري (الشهر الحالي)"),
-
-                    _buildListTileCard(
-                      "إجمالي المبيعات",
-                      sales,
-                      Icons.point_of_sale,
-                      Colors.teal,
-                      cardBg,
-                      textColor,
-                      () {}, // ممكن توديه لتقرير مبيعات
-                    ),
-                    _buildListTileCard(
-                      "إجمالي فواتير الشراء",
-                      purchasesBills,
-                      Icons.inventory,
-                      Colors.blue,
-                      cardBg,
-                      textColor,
-                      // () => _navigateTo(const PurchaseHistoryScreen()) // فعل هذا السطر لو عندك الشاشة
-                      () {},
-                    ),
-                    _buildListTileCard(
-                      "مرتجعات العملاء",
-                      -clientReturns, // بالسالب للتوضيح
-                      Icons.assignment_return,
-                      Colors.deepPurple,
-                      cardBg,
-                      textColor,
-                      // نفتح التاب رقم 0
-                      () =>
-                          _navigateTo(const ReturnsListScreen(initialIndex: 0)),
-                    ),
-
-                    _buildListTileCard(
-                      "مرتجعات الموردين",
-                      -supplierReturns, // بالسالب للتوضيح
-                      Icons.unarchive,
-                      Colors.orange,
-                      cardBg,
-                      textColor,
-                      // نفتح التاب رقم 0
-                      () =>
-                          _navigateTo(const ReturnsListScreen(initialIndex: 1)),
-                    ),
-                    _buildListTileCard(
-                      "المصروفات",
-                      -expenses,
-                      Icons.money_off,
-                      Colors.redAccent,
-                      cardBg,
-                      textColor,
-                      () => _navigateTo(const ExpensesScreen()),
-                    ),
-
-                    const SizedBox(height: 25),
-
-                    // ================= القسم الثالث: المركز المالي =================
-                    _buildSectionHeader("المركز المالي (الأرصدة الحالية)"),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildSummaryCard(
-                            "قيمة المخزون",
-                            _data['inventory'] ?? 0,
-                            Icons.store,
-                            Colors.blue,
-                            isDark,
-                            () => _navigateTo(const StoreScreen()),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildSummaryCard(
-                            "لنا عند العملاء",
-                            _data['receivables'] ?? 0,
-                            Icons.account_balance_wallet,
-                            Colors.green,
-                            isDark,
-                            () => _navigateTo(const ClientsScreen()),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _buildSummaryCard(
-                            "علينا للموردين",
-                            _data['payables'] ?? 0,
-                            Icons.money_off,
-                            Colors.red,
-                            isDark,
-                            () => _navigateTo(const SuppliersScreen()),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -316,14 +330,18 @@ class _GeneralReportsScreenState extends State<GeneralReportsScreen> {
               Text(
                 title,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                overflow: TextOverflow.ellipsis, // ✅ حماية للنص
               ),
               const SizedBox(height: 5),
-              Text(
-                "${amount.abs().toStringAsFixed(1)} ج.م",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: color,
+              FittedBox(
+                // ✅ حماية للرقم الكبير عشان ميضربش الشاشة
+                child: Text(
+                  "${amount.abs().toStringAsFixed(1)} ج.م",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
                 ),
               ),
             ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'pb_helper.dart';
+import 'services/purchases_service.dart';
+import 'services/reports_service.dart';
 
 class PurchaseHistoryScreen extends StatefulWidget {
   const PurchaseHistoryScreen({super.key});
@@ -16,20 +17,18 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
   Map<String, double> _returnsMap = {};
   double _monthlyPurchases = 0.0;
 
-  // ✅ 1. متغير صلاحية (استخدام صلاحية الشراء لعمل المرتجع)
   bool _canAddReturn = false;
   final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
-    _loadPermissions(); // تحميل الصلاحيات
+    _loadPermissions();
     _loadData();
   }
 
-  // ✅ 2. دالة تحميل الصلاحيات
   Future<void> _loadPermissions() async {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = PurchasesService().pb.authStore.record?.id;
     if (myId == null) return;
 
     if (myId == _superAdminId) {
@@ -38,10 +37,10 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
     }
 
     try {
-      final userRecord = await PBHelper().pb.collection('users').getOne(myId);
+      final userRecord = await PurchasesService().pb
+          .collection('users')
+          .getOne(myId);
       if (mounted) {
-        // نستخدم صلاحية "إضافة مشتريات" لتمكينه من عمل "مرتجع مشتريات"
-        // (لأننا لم ننشئ صلاحية خاصة بمرتجع الشراء في الداتا بيز)
         setState(() {
           _canAddReturn = userRecord.data['allow_add_purchases'] ?? false;
         });
@@ -52,10 +51,9 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
   }
 
   void _loadData() async {
-    final data = await PBHelper().getPurchasesWithNames();
+    final data = await PurchasesService().getPurchases();
 
-    // 1. جلب المرتجعات وحسابها
-    final allReturns = await PBHelper().getAllPurchaseReturns();
+    final allReturns = await PurchasesService().getAllPurchaseReturns();
     Map<String, double> returnsMap = {};
     for (var ret in allReturns) {
       String invId =
@@ -66,9 +64,8 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
       }
     }
 
-    final reportData = await PBHelper().getGeneralReportData();
+    final reportData = await ReportsService().getGeneralReportData();
 
-    // 3. تجميع الفواتير حسب المورد
     Map<String, List<Map<String, dynamic>>> grouped = {};
     for (var invoice in data) {
       String supplierName = invoice['supplierName'] ?? 'مورد غير معروف';
@@ -103,7 +100,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
   }
 
   void _showDetails(Map<String, dynamic> invoice) async {
-    final items = await PBHelper().getPurchaseItems(invoice['id']);
+    final items = await PurchasesService().getPurchaseItems(invoice['id']);
     if (!mounted) return;
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -164,7 +161,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                     ),
                   ),
 
-                  // ✅ 3. زر المرتجع (يخضع للصلاحية)
                   if (_canAddReturn)
                     ElevatedButton.icon(
                       onPressed: () {
@@ -318,12 +314,10 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
     );
   }
 
-  // --- ديالوج المرتجع ---
   void _showPurchaseReturnDialog(
     Map<String, dynamic> invoice,
     List<Map<String, dynamic>> items,
   ) {
-    // حماية إضافية
     if (!_canAddReturn) return;
 
     double invTax = (invoice['taxAmount'] as num?)?.toDouble() ?? 0.0;
@@ -378,22 +372,37 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
 
           final isDark = Theme.of(context).brightness == Brightness.dark;
 
-          return AlertDialog(
-            title: Text(
-              "مرتجع من فاتورة #${invoice['id'].toString().substring(0, 5)}",
-              style: const TextStyle(fontSize: 18),
+          return Dialog(
+            // ✅ تحويل لـ Dialog للتحكم في الحجم
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
             ),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 450,
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight:
+                    MediaQuery.of(context).size.height * 0.8, // ارتفاع مرن
+              ),
+              padding: const EdgeInsets.all(16),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  Text(
+                    "مرتجع من فاتورة #${invoice['id'].toString().substring(0, 5)}",
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   const Text(
                     "حدد الكميات التي تريد إعادتها للمورد:",
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
-                  Expanded(
-                    child: ListView.builder(
+                  const SizedBox(height: 10),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      separatorBuilder: (c, i) => const SizedBox(height: 5),
                       itemCount: items.length,
                       itemBuilder: (context, index) {
                         final item = items[index];
@@ -401,53 +410,83 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                         String prodId = item['product'];
                         int currentReturn = returnQuantities[prodId] ?? 0;
 
-                        return Card(
-                          color: isDark ? Colors.grey[800] : Colors.grey[50],
-                          margin: const EdgeInsets.symmetric(vertical: 5),
-                          child: ListTile(
-                            title: Text(
-                              item['productName'] ?? '',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.grey[800] : Colors.grey[100],
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.all(8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item['productName'] ?? '',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      "سعر: ${item['costPrice']}",
+                                      style: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                            subtitle: Text("سعر: ${item['costPrice']}"),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.remove_circle,
-                                    color: Colors.red,
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.remove_circle_outline,
+                                      color: Colors.red,
+                                    ),
+                                    onPressed: currentReturn > 0
+                                        ? () => setStateDialog(
+                                            () => returnQuantities[prodId] =
+                                                currentReturn - 1,
+                                          )
+                                        : null,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
                                   ),
-                                  onPressed: currentReturn > 0
-                                      ? () => setStateDialog(
-                                          () => returnQuantities[prodId] =
-                                              currentReturn - 1,
-                                        )
-                                      : null,
-                                ),
-                                Text(
-                                  "$currentReturn",
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
+                                  SizedBox(
+                                    width: 30,
+                                    child: Center(
+                                      child: Text(
+                                        "$currentReturn",
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.add_circle,
-                                    color: Colors.green,
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.add_circle_outline,
+                                      color: Colors.green,
+                                    ),
+                                    onPressed: currentReturn < maxQty
+                                        ? () => setStateDialog(
+                                            () => returnQuantities[prodId] =
+                                                currentReturn + 1,
+                                          )
+                                        : null,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
                                   ),
-                                  onPressed: currentReturn < maxQty
-                                      ? () => setStateDialog(
-                                          () => returnQuantities[prodId] =
-                                              currentReturn + 1,
-                                        )
-                                      : null,
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -480,40 +519,51 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                     isBold: true,
                     color: Colors.blue,
                   ),
+                  const SizedBox(height: 15),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text("إلغاء"),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                          ),
+                          onPressed: finalReturnTotal > 0
+                              ? () async {
+                                  await PurchasesService().createPurchaseReturn(
+                                    invoice['id'],
+                                    invoice['supplier'] ??
+                                        invoice['supplierId'],
+                                    finalReturnTotal,
+                                    itemsToReturn,
+                                  );
+                                  Navigator.pop(ctx);
+                                  _loadData();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('تم إنشاء المرتجع بنجاح ✅'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                }
+                              : null,
+                          child: const Text(
+                            "تأكيد الإرجاع",
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("إلغاء"),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: finalReturnTotal > 0
-                    ? () async {
-                        await PBHelper().createPurchaseReturn(
-                          invoice['id'],
-                          invoice['supplier'] ?? invoice['supplierId'],
-                          finalReturnTotal,
-                          itemsToReturn,
-                        );
-                        Navigator.pop(ctx);
-                        _loadData();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('تم إنشاء المرتجع بنجاح ✅'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      }
-                    : null,
-                child: const Text(
-                  "تأكيد الإرجاع",
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
           );
         },
       ),
@@ -691,37 +741,41 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                     },
                   ),
           ),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
+
+          // ✅ Fix: SafeArea للشريط السفلي
+          SafeArea(
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
                 ),
-              ],
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "إجمالي مشتريات الشهر الحالي:",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  "${fmt(_monthlyPurchases)} ج.م",
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.brown[200] : Colors.brown[800],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, -5),
                   ),
-                ),
-              ],
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "إجمالي مشتريات الشهر الحالي:",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    "${fmt(_monthlyPurchases)} ج.م",
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.brown[200] : Colors.brown[800],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

@@ -1,5 +1,7 @@
+import 'package:al_sakr/services/pb_helper.dart';
 import 'package:flutter/material.dart';
-import 'pb_helper.dart';
+import 'services/reports_service.dart';
+import 'services/sales_service.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -12,25 +14,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> _allSales = [];
   Map<String, List<Map<String, dynamic>>> _groupedSales = {};
 
-  // خرائط المرتجعات
   Map<String, double> _returnsTotalMap = {};
   Map<String, double> _returnsPaidMap = {};
 
   bool _isLoading = true;
   double _monthlyNetProfit = 0.0;
 
-  // ✅ 1. متغير صلاحية إضافة مرتجع
   bool _canAddReturn = false;
   final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
-    _loadPermissions(); // تحميل الصلاحيات
+    _loadPermissions();
     _loadData();
   }
 
-  // ✅ 2. دالة تحميل الصلاحيات
   Future<void> _loadPermissions() async {
     final myId = PBHelper().pb.authStore.record?.id;
     if (myId == null) return;
@@ -53,8 +52,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   void _loadData() async {
-    final salesData = await PBHelper().getSales();
-    final allReturns = await PBHelper().getAllReturns();
+    final salesData = await SalesService().getSales();
+    final allReturns = await SalesService().getReturns();
 
     Map<String, double> returnsTotalMap = {};
     Map<String, double> returnsPaidMap = {};
@@ -76,7 +75,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       }
     }
 
-    final reportData = await PBHelper().getGeneralReportData();
+    final reportData = await ReportsService().getGeneralReportData();
 
     Map<String, List<Map<String, dynamic>>> grouped = {};
     for (var sale in salesData) {
@@ -116,7 +115,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return sum;
   }
 
-  // --- كارت الفاتورة ---
   Widget _buildInvoiceCard(Map<String, dynamic> sale, bool isDark) {
     double itemsTotal = (sale['totalAmount'] as num).toDouble();
     double discount = (sale['discount'] as num?)?.toDouble() ?? 0.0;
@@ -145,16 +143,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
       child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 10),
         title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              "فاتورة #${sale['id'].toString().substring(0, 5)}",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                color: isFullyReturned ? Colors.red : null,
+            // ✅ Fix 1: استخدام Expanded لمنع النص من الخروج عن الشاشة
+            Expanded(
+              child: Text(
+                "فاتورة #${sale['id'].toString().substring(0, 5)}",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: isFullyReturned ? Colors.red : null,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
+            const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -187,8 +189,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
           ],
         ),
-
-        // ✅ 3. زر المرتجع (يخضع للصلاحية)
         trailing: isFullyReturned
             ? Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -222,9 +222,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         minimumSize: const Size(60, 30),
                       ),
                     )
-                  : null // إخفاء الزر لو مفيش صلاحية
-                    ),
-
+                  : null),
         children: [
           Container(
             padding: const EdgeInsets.all(12),
@@ -257,7 +255,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     "-${fmt(wht)} ج.م",
                     color: Colors.teal,
                   ),
-
                 const Divider(height: 15, thickness: 1.5),
                 _buildInfoRow(
                   "الإجمالي النهائي",
@@ -266,14 +263,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   size: 15,
                   color: isDark ? Colors.tealAccent : Colors.teal,
                 ),
-
                 if (isCashSale)
                   _buildInfoRow(
                     "مدفوع (كاش)",
                     "${fmt(paidByClient)} ج.م",
                     color: Colors.green,
                   ),
-
                 if (returnedTotal > 0) ...[
                   const SizedBox(height: 10),
                   Container(
@@ -301,7 +296,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     ),
                   ),
                 ],
-
                 const Divider(),
                 _buildInfoRow(
                   remaining > 0.1
@@ -322,13 +316,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  // --- ديالوج المرتجع ---
   void _showReturnDialog(Map<String, dynamic> sale) async {
-    // حماية إضافية
     if (!_canAddReturn) return;
 
-    final items = await PBHelper().getSaleItems(sale['id']);
-    final previouslyReturnedMap = await PBHelper().getAlreadyReturnedItems(
+    final items = await SalesService().getSaleItems(sale['id']);
+    final previouslyReturnedMap = await SalesService().getAlreadyReturnedItems(
       sale['id'],
     );
 
@@ -380,22 +372,38 @@ class _ReportsScreenState extends State<ReportsScreen> {
           double finalReturnTotal =
               netReturnBeforeTax + returnTaxShare - returnWhtShare;
 
-          return AlertDialog(
-            title: Text(
-              "مرتجع فاتورة #${sale['id'].toString().substring(0, 5)}",
+          return Dialog(
+            // ✅ Fix 3: استخدام Dialog للتحكم في الارتفاع
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
             ),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 450,
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight:
+                    MediaQuery.of(context).size.height * 0.8, // ارتفاع ديناميكي
+              ),
+              padding: const EdgeInsets.all(16),
               child: Column(
+                mainAxisSize: MainAxisSize.min, // مهم جداً
                 children: [
+                  Text(
+                    "مرتجع فاتورة #${sale['id'].toString().substring(0, 5)}",
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   const Text(
                     "حدد الكميات للإرجاع:",
                     style: TextStyle(color: Colors.grey),
                   ),
                   const SizedBox(height: 10),
-                  Expanded(
-                    child: ListView.builder(
+                  Flexible(
+                    // ✅ استخدام Flexible بدلاً من Expanded لتجنب المشاكل داخل Column
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      separatorBuilder: (c, i) => const SizedBox(height: 5),
                       itemCount: items.length,
                       itemBuilder: (context, index) {
                         final item = items[index];
@@ -409,67 +417,99 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         String itemId = item['id'];
                         int currentReturnQty = returnQuantities[itemId] ?? 0;
 
-                        return Card(
-                          color: isDark ? Colors.grey[800] : Colors.grey[100],
-                          child: Opacity(
-                            opacity: availableToReturn > 0 ? 1.0 : 0.5,
-                            child: ListTile(
-                              title: Text(
-                                item['productName'] ?? 'صنف',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              subtitle: Text("${fmt(item['price'])} ج.م"),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (availableToReturn > 0) ...[
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.remove,
-                                        color: Colors.red,
-                                      ),
-                                      onPressed: () {
-                                        if (currentReturnQty > 0)
-                                          setStateSB(
-                                            () => returnQuantities[itemId] =
-                                                currentReturnQty - 1,
-                                          );
-                                      },
-                                    ),
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.grey[800] : Colors.grey[100],
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.all(8),
+                          child: Row(
+                            children: [
+                              // اسم المنتج
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
                                     Text(
-                                      "$currentReturnQty",
+                                      item['productName'] ?? 'صنف',
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
-                                        fontSize: 16,
+                                        fontSize: 13,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      "${fmt(item['price'])} ج.م",
+                                      style: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // العداد
+                              if (availableToReturn > 0)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.remove_circle_outline,
+                                        color: Colors.red,
+                                      ),
+                                      onPressed: currentReturnQty > 0
+                                          ? () => setStateSB(
+                                              () => returnQuantities[itemId] =
+                                                  currentReturnQty - 1,
+                                            )
+                                          : null,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                    ),
+                                    SizedBox(
+                                      width: 30,
+                                      child: Center(
+                                        child: Text(
+                                          "$currentReturnQty",
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                     IconButton(
                                       icon: const Icon(
-                                        Icons.add,
+                                        Icons.add_circle_outline,
                                         color: Colors.green,
                                       ),
-                                      onPressed: () {
-                                        if (currentReturnQty <
-                                            availableToReturn)
-                                          setStateSB(
-                                            () => returnQuantities[itemId] =
-                                                currentReturnQty + 1,
-                                          );
-                                      },
+                                      onPressed:
+                                          currentReturnQty < availableToReturn
+                                          ? () => setStateSB(
+                                              () => returnQuantities[itemId] =
+                                                  currentReturnQty + 1,
+                                            )
+                                          : null,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
                                     ),
-                                  ] else
-                                    const Text(
-                                      "مكتمل",
-                                      style: TextStyle(
-                                        color: Colors.red,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                  ],
+                                )
+                              else
+                                const Padding(
+                                  padding: EdgeInsets.all(8.0),
+                                  child: Text(
+                                    "مكتمل",
+                                    style: TextStyle(
+                                      color: Colors.red,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
                                     ),
-                                ],
-                              ),
-                            ),
+                                  ),
+                                ),
+                            ],
                           ),
                         );
                       },
@@ -502,47 +542,59 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     isBold: true,
                     color: isDark ? Colors.greenAccent : Colors.green[800],
                   ),
+                  const SizedBox(height: 15),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text("إلغاء"),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                          ),
+                          onPressed: () async {
+                            if (finalReturnTotal <= 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'يجب اختيار صنف واحد على الأقل',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            await SalesService().createReturn(
+                              sale['id'],
+                              sale['clientId'] ?? sale['client'],
+                              finalReturnTotal,
+                              itemsToReturn,
+                              discount: returnDiscountShare,
+                            );
+                            Navigator.pop(ctx);
+                            _loadData();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('تم تسجيل المرتجع بنجاح ✅'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            "تأكيد",
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("إلغاء"),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: () async {
-                  if (finalReturnTotal <= 0) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('يجب اختيار صنف واحد على الأقل'),
-                      ),
-                    );
-                    return;
-                  }
-                  await PBHelper().createReturn(
-                    sale['id'],
-                    sale['clientId'] ?? sale['client'],
-                    finalReturnTotal,
-                    itemsToReturn,
-                    discount: returnDiscountShare,
-                  );
-                  Navigator.pop(ctx);
-                  _loadData();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('تم تسجيل المرتجع بنجاح ✅'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                },
-                child: const Text(
-                  "تأكيد",
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
           );
         },
       ),
@@ -613,6 +665,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       appBar: AppBar(title: const Text('سجل المبيعات ')),
       body: Column(
         children: [
+          // الهيدر العلوي
           Container(
             padding: const EdgeInsets.all(15),
             color: isDark
@@ -657,6 +710,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             ),
           ),
+
+          // القائمة
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -712,46 +767,50 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     },
                   ),
           ),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
+
+          // ✅ Fix 2: الشريط السفلي داخل SafeArea لمنع القص
+          SafeArea(
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
                 ),
-              ],
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "صافي حركة الشهر (ربح/خسارة):",
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      "(المبيعات الصافية - المصاريف)",
-                      style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-                Text(
-                  "${fmt(_monthlyNetProfit)} ج.م",
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: profitColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, -5),
                   ),
-                ),
-              ],
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "صافي حركة الشهر (ربح/خسارة):",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        "(المبيعات الصافية - المصاريف)",
+                        style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    "${fmt(_monthlyNetProfit)} ج.م",
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: profitColor,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

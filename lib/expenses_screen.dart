@@ -1,6 +1,10 @@
+import 'package:al_sakr/services/auth_service.dart';
+import 'package:al_sakr/services/purchases_service.dart';
+import 'package:al_sakr/services/sales_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'pb_helper.dart';
+
+import 'services/pb_helper.dart';
 
 class ExpensesScreen extends StatefulWidget {
   const ExpensesScreen({super.key});
@@ -10,11 +14,9 @@ class ExpensesScreen extends StatefulWidget {
 }
 
 class _ExpensesScreenState extends State<ExpensesScreen> {
-  List<Map<String, dynamic>> _expenses = [];
-  bool _isLoading = true;
-  double _totalExpenses = 0.0;
+  // لم نعد بحاجة لقائمة _expenses اليدوية ولا _isLoading ولا _totalExpenses كمتغيرات حالة
+  // سيتم حسابهم لحظياً داخل الـ StreamBuilder
 
-  // ✅ 1. متغيرات الصلاحيات
   bool _canAdd = false;
   bool _canDelete = false;
   final String _superAdminId = "1sxo74splxbw1yh";
@@ -36,13 +38,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   @override
   void initState() {
     super.initState();
-    _loadPermissions(); // تحميل الصلاحيات
-    _loadExpenses();
+    _loadPermissions();
+    // _loadExpenses(); // ❌ تم إلغاؤها لأننا نستخدم Stream
   }
 
-  // ✅ 2. دالة تحميل الصلاحيات
   Future<void> _loadPermissions() async {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = SalesService().pb.authStore.record?.id;
     if (myId == null) return;
 
     if (myId == _superAdminId) {
@@ -55,7 +56,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     }
 
     try {
-      final userRecord = await PBHelper().pb.collection('users').getOne(myId);
+      final userRecord = await AuthService().pb
+          .collection('users')
+          .getOne(myId);
       if (mounted) {
         setState(() {
           _canAdd = userRecord.data['allow_add_expenses'] ?? false;
@@ -64,22 +67,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       }
     } catch (e) {
       //
-    }
-  }
-
-  void _loadExpenses() async {
-    setState(() => _isLoading = true);
-    final data = await PBHelper().getExpenses();
-    double total = 0;
-    for (var item in data) {
-      total += (item['amount'] as num).toDouble();
-    }
-    if (mounted) {
-      setState(() {
-        _expenses = data;
-        _totalExpenses = total;
-        _isLoading = false;
-      });
     }
   }
 
@@ -109,7 +96,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   void _showManageCategoriesDialog(StateSetter updateParentState) {
-    // حماية: إدارة التصنيفات تعتبر جزء من الإضافة
     if (!_canAdd) {
       ScaffoldMessenger.of(
         context,
@@ -198,7 +184,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   void _showExpenseDialog({Map<String, dynamic>? expenseToEdit}) {
-    // حماية
     if (expenseToEdit == null && !_canAdd) return;
     if (expenseToEdit != null && !_canAdd) return;
 
@@ -224,189 +209,344 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       _categories.add(selectedCategory);
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    double screenWidth = MediaQuery.of(context).size.width;
+    double dialogWidth = screenWidth > 600 ? 500 : screenWidth * 0.95;
+
     showDialog(
       context: context,
       builder: (_) {
         return StatefulBuilder(
           builder: (context, setStateSB) {
-            return AlertDialog(
-              title: Text(isEditing ? 'تعديل مصروف' : 'تسجيل مصروف جديد'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: amountController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d+\.?\d*'),
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+              ),
+              backgroundColor: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 20,
+              ),
+              child: Container(
+                width: dialogWidth,
+                padding: const EdgeInsets.all(20),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        isEditing ? 'تعديل مصروف' : 'تسجيل مصروف جديد',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black,
                         ),
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: 'المبلغ *',
-                        prefixIcon: Icon(Icons.money),
-                        border: OutlineInputBorder(),
-                        hintText: "0.00",
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(
-                        labelText: 'بند الصرف (اختياري)',
-                        hintText: 'اتركه فارغاً لاستخدام اسم التصنيف',
-                        prefixIcon: Icon(Icons.title),
-                        border: OutlineInputBorder(),
+                      const SizedBox(height: 20),
+
+                      // 1. المبلغ (الأول)
+                      TextField(
+                        controller: amountController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'^\d+\.?\d*'),
+                          ),
+                        ],
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'المبلغ *',
+                          labelStyle: TextStyle(
+                            color: isDark ? Colors.grey[400] : null,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.money,
+                            color: isDark ? Colors.grey[400] : null,
+                          ),
+                          border: const OutlineInputBorder(),
+                          hintText: "0.00",
+                          filled: true,
+                          fillColor: isDark
+                              ? const Color(0xFF383838)
+                              : Colors.grey[50],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: selectedCategory,
-                            decoration: const InputDecoration(
-                              labelText: 'التصنيف',
-                              prefixIcon: Icon(Icons.category),
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 15,
+                      const SizedBox(height: 10),
+
+                      // 2. التصنيف
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: selectedCategory,
+                              isExpanded: true,
+                              dropdownColor: isDark
+                                  ? const Color(0xFF333333)
+                                  : Colors.white,
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black,
+                                fontSize: 14,
                               ),
-                            ),
-                            items: _categories.map((cat) {
-                              return DropdownMenuItem(
-                                value: cat,
-                                child: Text(
-                                  cat,
-                                  style: const TextStyle(fontSize: 14),
+                              decoration: InputDecoration(
+                                labelText: 'التصنيف',
+                                labelStyle: TextStyle(
+                                  color: isDark ? Colors.grey[400] : null,
                                 ),
-                              );
-                            }).toList(),
-                            onChanged: (val) {
-                              setStateSB(() => selectedCategory = val!);
-                            },
+                                prefixIcon: Icon(
+                                  Icons.category,
+                                  color: isDark ? Colors.grey[400] : null,
+                                ),
+                                border: const OutlineInputBorder(),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 15,
+                                ),
+                                filled: true,
+                                fillColor: isDark
+                                    ? const Color(0xFF383838)
+                                    : Colors.grey[50],
+                              ),
+                              items: _categories.map((cat) {
+                                return DropdownMenuItem(
+                                  value: cat,
+                                  child: Text(
+                                    cat,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                setStateSB(() => selectedCategory = val!);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF383838)
+                                  : Colors.grey[200],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey),
+                            ),
+                            child: IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              onPressed: () =>
+                                  _showManageCategoriesDialog(setStateSB),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      // 3. بند الصرف
+                      TextField(
+                        controller: titleController,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'بند الصرف (اختياري)',
+                          hintText: 'وصف المصروف',
+                          labelStyle: TextStyle(
+                            color: isDark ? Colors.grey[400] : null,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.title,
+                            color: isDark ? Colors.grey[400] : null,
+                          ),
+                          border: const OutlineInputBorder(),
+                          filled: true,
+                          fillColor: isDark
+                              ? const Color(0xFF383838)
+                              : Colors.grey[50],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // 4. التاريخ
+                      InkWell(
+                        onTap: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: selectedDate,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime(2030),
+                            builder: (c, child) => Theme(
+                              data: Theme.of(context).copyWith(
+                                colorScheme: isDark
+                                    ? const ColorScheme.dark(
+                                        primary: Colors.red,
+                                        onPrimary: Colors.white,
+                                        surface: Color(0xFF424242),
+                                        onSurface: Colors.white,
+                                      )
+                                    : const ColorScheme.light(
+                                        primary: Colors.red,
+                                      ),
+                                dialogTheme: DialogThemeData(
+                                  backgroundColor: isDark
+                                      ? const Color(0xFF424242)
+                                      : Colors.white,
+                                ),
+                              ),
+                              child: child!,
+                            ),
+                          );
+                          if (picked != null)
+                            setStateSB(() => selectedDate = picked);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(15),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF383838)
+                                : Colors.grey[50],
+                            border: Border.all(color: Colors.grey),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                "${selectedDate.year}-${selectedDate.month}-${selectedDate.day}",
+                                style: TextStyle(
+                                  color: isDark ? Colors.white : Colors.black,
+                                ),
+                              ),
+                              Icon(
+                                Icons.calendar_today,
+                                color: isDark ? Colors.grey : Colors.black54,
+                              ),
+                            ],
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () =>
-                              _showManageCategoriesDialog(setStateSB),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // 5. ملاحظات
+                      TextField(
+                        controller: notesController,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    InkWell(
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: selectedDate,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2030),
-                        );
-                        if (picked != null)
-                          setStateSB(() => selectedDate = picked);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(5),
+                        decoration: InputDecoration(
+                          labelText: 'ملاحظات إضافية',
+                          labelStyle: TextStyle(
+                            color: isDark ? Colors.grey[400] : null,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.note,
+                            color: isDark ? Colors.grey[400] : null,
+                          ),
+                          border: const OutlineInputBorder(),
+                          filled: true,
+                          fillColor: isDark
+                              ? const Color(0xFF383838)
+                              : Colors.grey[50],
                         ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              "${selectedDate.year}-${selectedDate.month}-${selectedDate.day}",
+                      ),
+                      const SizedBox(height: 20),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('إلغاء'),
                             ),
-                            const Icon(Icons.calendar_today),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isEditing
+                                    ? Colors.blue
+                                    : Colors.red[700],
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                              ),
+                              onPressed: () async {
+                                if (amountController.text.isNotEmpty) {
+                                  String finalTitle = titleController.text
+                                      .trim();
+
+                                  try {
+                                    if (isEditing) {
+                                      await PurchasesService()
+                                          .updateExpense(expenseToEdit['id'], {
+                                            'title': finalTitle,
+                                            'amount':
+                                                double.tryParse(
+                                                  amountController.text,
+                                                ) ??
+                                                0.0,
+                                            'category': selectedCategory,
+                                            'date': selectedDate
+                                                .toIso8601String(),
+                                            'notes': notesController.text,
+                                          });
+                                    } else {
+                                      await PurchasesService().insertExpense({
+                                        'title': finalTitle,
+                                        'amount':
+                                            double.tryParse(
+                                              amountController.text,
+                                            ) ??
+                                            0.0,
+                                        'category': selectedCategory,
+                                        'date': selectedDate.toIso8601String(),
+                                        'notes': notesController.text,
+                                      });
+                                    }
+                                    Navigator.pop(context);
+                                    // _loadExpenses(); // ❌ لا حاجة لها مع Stream
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          isEditing
+                                              ? 'تم تعديل المصروف بنجاح'
+                                              : 'تم تسجيل المصروف بنجاح',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        backgroundColor: Colors.green,
+                                      ),
+                                    );
+                                  } catch (e) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('خطأ: $e'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('يرجى إدخال المبلغ'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
+                              },
+                              child: Text(isEditing ? 'حفظ التعديلات' : 'حفظ'),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: notesController,
-                      decoration: const InputDecoration(
-                        labelText: 'ملاحظات إضافية',
-                        prefixIcon: Icon(Icons.note),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('إلغاء'),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isEditing ? Colors.blue : Colors.red[700],
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () async {
-                    if (amountController.text.isNotEmpty) {
-                      String finalTitle = titleController.text.isEmpty
-                          ? selectedCategory
-                          : titleController.text;
-                      try {
-                        if (isEditing) {
-                          await PBHelper().updateExpense(expenseToEdit['id'], {
-                            'title': finalTitle,
-                            'amount':
-                                double.tryParse(amountController.text) ?? 0.0,
-                            'category': selectedCategory,
-                            'date': selectedDate.toIso8601String(),
-                            'notes': notesController.text,
-                          });
-                        } else {
-                          await PBHelper().insertExpense({
-                            'title': finalTitle,
-                            'amount':
-                                double.tryParse(amountController.text) ?? 0.0,
-                            'category': selectedCategory,
-                            'date': selectedDate.toIso8601String(),
-                            'notes': notesController.text,
-                          });
-                        }
-                        Navigator.pop(context);
-                        _loadExpenses();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              isEditing
-                                  ? 'تم تعديل المصروف بنجاح'
-                                  : 'تم تسجيل المصروف بنجاح',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('خطأ: $e'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                      }
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('يرجى إدخال المبلغ'),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                    }
-                  },
-                  child: Text(isEditing ? 'حفظ التعديلات' : 'حفظ'),
-                ),
-              ],
             );
           },
         );
@@ -415,7 +555,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   void _deleteExpense(String id) async {
-    if (!_canDelete) return; // حماية
+    if (!_canDelete) return;
 
     showDialog(
       context: context,
@@ -430,8 +570,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await PBHelper().deleteExpense(id);
-              _loadExpenses();
+              await PurchasesService().deleteExpense(id);
+              // _loadExpenses(); // ❌ لا حاجة لها مع Stream
             },
             child: const Text('حذف', style: TextStyle(color: Colors.red)),
           ),
@@ -446,153 +586,202 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('إدارة المصروفات')),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            margin: const EdgeInsets.all(15),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: isDark
-                    ? [Colors.red[900]!, Colors.red[700]!]
-                    : [Colors.red[700]!, Colors.red[400]!],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(15),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.red.withOpacity(0.3),
-                  blurRadius: 10,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                const Text(
-                  'إجمالي المصروفات المسجلة',
-                  style: TextStyle(color: Colors.white, fontSize: 16),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  '${_totalExpenses.toStringAsFixed(2)} ج.م',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _expenses.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.money_off,
-                          size: 80,
-                          color: Colors.grey[400],
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'لا توجد مصروفات مسجلة',
-                          style: TextStyle(color: Colors.grey[600]),
+      // ✅ استخدام StreamBuilder للبيانات الحية (Real-time)
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: PBHelper().getCollectionStream('expenses', sort: '-created'),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return const Center(child: Text("حدث خطأ في تحميل البيانات"));
+          }
+
+          final expensesList = snapshot.data ?? [];
+
+          // ✅ حساب الإجمالي تلقائياً من البيانات الواردة
+          double totalExpenses = expensesList.fold(
+            0.0,
+            (sum, item) => sum + (item['amount'] as num).toDouble(),
+          );
+
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 900),
+              child: Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    margin: const EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: isDark
+                            ? [Colors.red[900]!, Colors.red[700]!]
+                            : [Colors.red[700]!, Colors.red[400]!],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(15),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withOpacity(0.3),
+                          blurRadius: 10,
+                          offset: const Offset(0, 5),
                         ),
                       ],
                     ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 15),
-                    itemCount: _expenses.length,
-                    itemBuilder: (context, index) {
-                      final item = _expenses[index];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    child: Column(
+                      children: [
+                        const Text(
+                          'إجمالي المصروفات المسجلة',
+                          style: TextStyle(color: Colors.white, fontSize: 16),
                         ),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: isDark
-                                ? Colors.red.withOpacity(0.2)
-                                : Colors.red[50],
-                            child: Icon(
-                              _getCategoryIcon(item['category']),
-                              color: isDark ? Colors.red[200] : Colors.red[800],
-                            ),
-                          ),
-                          title: Text(
-                            item['title'],
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${item['category']} • ${item['date'].toString().split(' ')[0]}',
-                              ),
-                              if (item['notes'] != null &&
-                                  item['notes'].toString().isNotEmpty)
-                                Text(
-                                  'ملاحظة: ${item['notes']}',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '-${item['amount']} ج.م',
-                                style: TextStyle(
-                                  color: Colors.red[700],
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              const SizedBox(width: 5),
-
-                              // ✅ 3. أزرار التعديل والحذف (تخضع للصلاحية)
-                              if (_canAdd)
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.edit,
-                                    color: Colors.blue,
-                                    size: 20,
-                                  ),
-                                  onPressed: () =>
-                                      _showExpenseDialog(expenseToEdit: item),
-                                ),
-                              if (_canDelete)
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.delete,
-                                    color: Colors.grey,
-                                    size: 20,
-                                  ),
-                                  onPressed: () => _deleteExpense(item['id']),
-                                ),
-                            ],
+                        const SizedBox(height: 10),
+                        Text(
+                          '${totalExpenses.toStringAsFixed(2)} ج.م',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      );
-                    },
+                      ],
+                    ),
                   ),
-          ),
-        ],
+
+                  Expanded(
+                    child: expensesList.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.money_off,
+                                  size: 80,
+                                  color: Colors.grey[400],
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'لا توجد مصروفات مسجلة',
+                                  style: TextStyle(color: Colors.grey[600]),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.only(
+                              left: 15,
+                              right: 15,
+                              top: 0,
+                              bottom: 100,
+                            ),
+                            itemCount: expensesList.length,
+                            itemBuilder: (context, index) {
+                              final item = expensesList[index];
+
+                              String titleToShow =
+                                  item['title'].toString().isEmpty
+                                  ? item['category']
+                                  : item['title'];
+
+                              bool isTitleSameAsCategory =
+                                  (item['title'].toString().isEmpty ||
+                                  item['title'] == item['category']);
+                              String datePart = item['date'].toString().split(
+                                ' ',
+                              )[0];
+
+                              String subtitleText = isTitleSameAsCategory
+                                  ? datePart
+                                  : '${item['category']} • $datePart';
+
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                elevation: 2,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: isDark
+                                        ? Colors.red.withOpacity(0.2)
+                                        : Colors.red[50],
+                                    child: Icon(
+                                      _getCategoryIcon(item['category']),
+                                      color: isDark
+                                          ? Colors.red[200]
+                                          : Colors.red[800],
+                                    ),
+                                  ),
+                                  title: Text(
+                                    titleToShow,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(subtitleText),
+                                      if (item['notes'] != null &&
+                                          item['notes'].toString().isNotEmpty)
+                                        Text(
+                                          'ملاحظة: ${item['notes']}',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '-${item['amount']} ج.م',
+                                        style: TextStyle(
+                                          color: Colors.red[700],
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      if (_canAdd)
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.edit,
+                                            color: Colors.blue,
+                                            size: 20,
+                                          ),
+                                          onPressed: () => _showExpenseDialog(
+                                            expenseToEdit: item,
+                                          ),
+                                        ),
+                                      if (_canDelete)
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.delete,
+                                            color: Colors.grey,
+                                            size: 20,
+                                          ),
+                                          onPressed: () =>
+                                              _deleteExpense(item['id']),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
-      // ✅ 4. زر إضافة مصروف (يخضع للصلاحية)
       floatingActionButton: _canAdd
           ? FloatingActionButton.extended(
               onPressed: () => _showExpenseDialog(),

@@ -1,6 +1,6 @@
 import 'package:al_sakr/dashboard.dart';
 import 'package:flutter/material.dart';
-import 'pb_helper.dart';
+import 'services/auth_service.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // ✅ استدعاء المكتبة
 
 class LoginScreen extends StatefulWidget {
@@ -27,7 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     // 1. إلغاء أي اشتراك قديم
     try {
-      PBHelper().pb.realtime.unsubscribe();
+      AuthService().pb.realtime.unsubscribe();
     } catch (e) {
       // ignore
     }
@@ -62,7 +62,7 @@ class _LoginScreenState extends State<LoginScreen> {
     String fullEmail = "${_emailUserPartController.text.trim()}$_fixedDomain";
 
     // 2. محاولة الدخول
-    bool success = await PBHelper().login(
+    bool success = await AuthService().login(
       fullEmail,
       _passwordController.text.trim(),
     );
@@ -120,176 +120,183 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // الشعار أو الأيقونة
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  shape: BoxShape.circle,
+      // 🔥🔥 التعديل هنا: إجبار اتجاه العناصر ليكون من اليسار لليمين (English Layout)
+      body: Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // الشعار أو الأيقونة
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.lock_outline,
+                    size: 60,
+                    color: Colors.blue,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.lock_outline,
-                  size: 60,
-                  color: Colors.blue,
+                const SizedBox(height: 30),
+
+                const Text(
+                  "تسجيل الدخول",
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 30),
 
-              const Text(
-                "تسجيل الدخول",
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
+                const SizedBox(height: 40),
 
-              const SizedBox(height: 40),
-
-              // ✅ التعديل هنا: فصل الجزء الثابت خارج الـ TextField باستخدام Row
-              Row(
-                children: [
-                  // حقل إدخال الجزء الأول من الإيميل
-                  Expanded(
-                    child: TextField(
-                      controller: _emailUserPartController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        labelText: 'الإيميل (الجزء الأول)', // توضيح أكثر
-                        labelStyle: const TextStyle(color: Colors.grey),
-                        prefixIcon: const Icon(
-                          Icons.email_outlined,
-                          color: Colors.grey,
+                // ✅ التعديل هنا: فصل الجزء الثابت خارج الـ TextField باستخدام Row
+                Row(
+                  children: [
+                    // حقل إدخال الجزء الأول من الإيميل
+                    Expanded(
+                      child: TextField(
+                        controller: _emailUserPartController,
+                        style: const TextStyle(color: Colors.white),
+                        // بما أننا حولنا الاتجاه LTR، فالنص سيبدأ من اليسار تلقائياً
+                        decoration: InputDecoration(
+                          labelText: 'email ',
+                          labelStyle: const TextStyle(color: Colors.grey),
+                          prefixIcon: const Icon(
+                            Icons.email_outlined,
+                            color: Colors.grey,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.grey),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.blue),
+                          ),
+                          filled: true,
+                          fillColor: const Color(0xFF1E1E1E),
                         ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Colors.grey),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Colors.blue),
-                        ),
-                        filled: true,
-                        fillColor: const Color(0xFF1E1E1E),
-                        // تمت إزالة suffixText من هنا
                       ),
                     ),
-                  ),
 
-                  const SizedBox(width: 10), // مسافة صغيرة
-                  // ✅ الجزء الثابت من الإيميل (منفصل وبخط كبير)
-                  Text(
-                    _fixedDomain, // "@alsakr.com"
-                    style: const TextStyle(
-                      fontSize: 20, // تكبير الخط
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey, // لون واضح لكن غير مزعج
+                    const SizedBox(width: 10), // مسافة صغيرة
+                    // ✅ الجزء الثابت من الإيميل
+                    Text(
+                      _fixedDomain, // "@alsakr.com"
+                      style: const TextStyle(
+                        fontSize: 25, // تكبير الخط
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blueGrey, // لون واضح لكن غير مزعج
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
 
-              const SizedBox(height: 20),
+                const SizedBox(height: 20),
 
-              // حقل كلمة المرور (بدون تغيير)
-              TextField(
-                controller: _passwordController,
-                obscureText: _isObscure,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'كلمة المرور',
-                  labelStyle: const TextStyle(color: Colors.grey),
-                  prefixIcon: const Icon(
-                    Icons.lock_outline,
-                    color: Colors.grey,
-                  ),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _isObscure
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
+                // حقل كلمة المرور (بدون تغيير)
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _isObscure,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'password ',
+                    labelStyle: const TextStyle(color: Colors.grey),
+                    prefixIcon: const Icon(
+                      Icons.lock_outline,
                       color: Colors.grey,
                     ),
-                    onPressed: () => setState(() => _isObscure = !_isObscure),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Colors.grey),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Colors.blue),
-                  ),
-                  filled: true,
-                  fillColor: const Color(0xFF1E1E1E),
-                ),
-              ),
-
-              const SizedBox(height: 15),
-
-              // زر الحفظ (بدون تغيير)
-              Row(
-                children: [
-                  Checkbox(
-                    value: _rememberMe,
-                    activeColor: Colors.blue,
-                    side: const BorderSide(color: Colors.grey),
-                    onChanged: (val) {
-                      setState(() {
-                        _rememberMe = val ?? false;
-                      });
-                    },
-                  ),
-                  const Text(
-                    "حفظ بيانات الدخول",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  const Spacer(),
-                  if (_emailUserPartController.text.isNotEmpty)
-                    TextButton(
-                      onPressed: _clearSavedData,
-                      child: const Text(
-                        "مسح المحفوظ",
-                        style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _isObscure
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: Colors.grey,
                       ),
+                      onPressed: () => setState(() => _isObscure = !_isObscure),
                     ),
-                ],
-              ),
-
-              const SizedBox(height: 30),
-
-              // زر الدخول (بدون تغيير)
-              SizedBox(
-                width: double.infinity,
-                height: 55,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _login,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[700],
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
+                    enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.grey),
                     ),
-                    elevation: 5,
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.blue),
+                    ),
+                    filled: true,
+                    fillColor: const Color(0xFF1E1E1E),
                   ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text(
-                          'دخول',
+                ),
+
+                const SizedBox(height: 15),
+
+                // زر الحفظ (بدون تغيير)
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _rememberMe,
+                      activeColor: Colors.blue,
+                      side: const BorderSide(color: Colors.grey),
+                      onChanged: (val) {
+                        setState(() {
+                          _rememberMe = val ?? false;
+                        });
+                      },
+                    ),
+                    const Text(
+                      "حفظ بيانات الدخول",
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    const Spacer(),
+                    if (_emailUserPartController.text.isNotEmpty)
+                      TextButton(
+                        onPressed: _clearSavedData,
+                        child: const Text(
+                          "مسح المحفوظ",
                           style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                            color: Colors.redAccent,
+                            fontSize: 12,
                           ),
                         ),
+                      ),
+                  ],
                 ),
-              ),
-            ],
+
+                const SizedBox(height: 30),
+
+                // زر الدخول (بدون تغيير)
+                SizedBox(
+                  width: double.infinity,
+                  height: 55,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue[700],
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 5,
+                    ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
+                            'دخول',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

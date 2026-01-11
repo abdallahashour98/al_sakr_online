@@ -1,7 +1,8 @@
+import 'package:al_sakr/services/sales_service.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'PdfService.dart';
-import 'pb_helper.dart';
+import 'services/inventory_service.dart';
 import 'product_search_dialog.dart';
 
 class DeliveryOrdersScreen extends StatefulWidget {
@@ -20,7 +21,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isLoading = true;
 
-  // ✅ 1. متغيرات الصلاحيات
   bool _canAdd = false;
   bool _canDelete = false;
 
@@ -30,12 +30,28 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
   void initState() {
     super.initState();
     _loadPermissions();
-    _loadData();
+    _loadData(); // تحميل أولي
+
+    // ✅ الاشتراك في التحديثات اللحظية (Real-time)
+    // عند حدوث أي تغيير (إضافة/تعديل/حذف) في جدول الأذونات، نعيد تحميل البيانات
+    InventoryService().pb.collection('delivery_orders').subscribe('*', (e) {
+      if (mounted) {
+        // نمرر false عشان الشاشة متعملش وميض (Loading) مزعج، بل تحدث البيانات في الخلفية
+        _loadData(showLoading: false);
+      }
+    });
   }
 
-  // ✅ 2. دالة تحميل الصلاحيات
+  @override
+  void dispose() {
+    // ✅ إلغاء الاشتراك عند الخروج لتوفير الموارد
+    InventoryService().pb.collection('delivery_orders').unsubscribe('*');
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadPermissions() async {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = InventoryService().pb.authStore.record?.id;
     if (myId == null) return;
 
     if (myId == _superAdminId) {
@@ -48,7 +64,9 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     }
 
     try {
-      final userRecord = await PBHelper().pb.collection('users').getOne(myId);
+      final userRecord = await InventoryService().pb
+          .collection('users')
+          .getOne(myId);
       if (mounted) {
         setState(() {
           _canAdd = userRecord.data['allow_add_delivery'] ?? false;
@@ -60,17 +78,28 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     }
   }
 
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+  // ✅ تعديل الدالة لتقبل showLoading للتحكم في ظهور التحميل
+  Future<void> _loadData({bool showLoading = true}) async {
+    if (showLoading) setState(() => _isLoading = true);
 
-    final rawOrders = await PBHelper().getAllDeliveryOrders();
-    final clients = await PBHelper().getClients();
-    final products = await PBHelper().getProducts();
+    final rawOrders = await SalesService().getAllDeliveryOrders();
+    // نجلب العملاء والمنتجات فقط إذا كانت القوائم فارغة (تحسين للأداء)
+    if (_clients.isEmpty) {
+      final clients = await SalesService().getClients();
+      final products = await InventoryService().getProducts();
+      if (mounted) {
+        setState(() {
+          _clients = clients;
+          _products = products;
+        });
+      }
+    }
 
     List<Map<String, dynamic>> enrichedOrders = [];
 
+    // معالجة البيانات (تجميع أرقام أوامر التوريد)
     for (var order in rawOrders) {
-      final items = await PBHelper().getDeliveryOrderItems(order['id']);
+      final items = await SalesService().getDeliveryOrderItems(order['id']);
       Set<String> allNumbers = {};
 
       if (order['supplyOrderNumber'] != null &&
@@ -100,11 +129,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     _groupOrders(_allOrdersFlat);
 
     if (mounted) {
-      setState(() {
-        _clients = clients;
-        _products = products;
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
@@ -119,9 +144,11 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
       tempGrouped[clientName]!.add(order);
     }
 
-    setState(() {
-      _groupedOrders = tempGrouped;
-    });
+    if (mounted) {
+      setState(() {
+        _groupedOrders = tempGrouped;
+      });
+    }
   }
 
   void _filterOrders(String query) {
@@ -155,9 +182,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     Map<String, dynamic>? existingOrder,
     List<Map<String, dynamic>>? existingItems,
   }) {
-    // حماية: لو إضافة ومعنديش صلاحية
     if (existingOrder == null && !_canAdd) return;
-    // حماية: لو تعديل ومعنديش صلاحية (نعتبرها نفس صلاحية الإضافة)
     if (existingOrder != null && !_canAdd) return;
 
     final isEditing = existingOrder != null;
@@ -236,53 +261,64 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                       ? 'إضافة صنف'
                       : 'إضافة لـ ($sectionOrderNumber)',
                 ),
-                content: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextFormField(
-                        controller: nameController,
-                        readOnly: true,
-                        decoration: const InputDecoration(
-                          labelText: "اختر الصنف",
-                          hintText: "اضغط للبحث...",
-                          suffixIcon: Icon(Icons.arrow_drop_down),
-                          border: OutlineInputBorder(),
-                        ),
-                        onTap: () async {
-                          final selectedProduct =
-                              await showDialog<Map<String, dynamic>>(
-                                context: context,
-                                builder: (ctx) =>
-                                    ProductSearchDialog(allProducts: _products),
-                              );
-                          if (selectedProduct != null) {
-                            prodName = selectedProduct['name'];
-                            prodId = selectedProduct['id'];
-                            nameController.text = prodName!;
-                            descCtrl.text = "${selectedProduct['name']} ";
-                          }
-                        },
+                content: SizedBox(
+                  width: double.maxFinite,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 500),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextFormField(
+                            controller: nameController,
+                            readOnly: true,
+                            decoration: const InputDecoration(
+                              labelText: "اختر الصنف",
+                              hintText: "اضغط للبحث...",
+                              suffixIcon: Icon(Icons.arrow_drop_down),
+                              border: OutlineInputBorder(),
+                            ),
+                            onTap: () async {
+                              final selectedProduct =
+                                  await showDialog<Map<String, dynamic>>(
+                                    context: context,
+                                    builder: (ctx) => ProductSearchDialog(
+                                      allProducts: _products,
+                                    ),
+                                  );
+                              if (selectedProduct != null) {
+                                prodName = selectedProduct['name'];
+                                prodId = selectedProduct['id'];
+                                nameController.text = prodName!;
+                                descCtrl.text = "${selectedProduct['name']} ";
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: qtyCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'العدد',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: descCtrl,
+                            minLines: 1,
+                            maxLines: 10,
+                            keyboardType: TextInputType.multiline,
+                            decoration: const InputDecoration(
+                              labelText: 'الوصف',
+                              hintText: 'اكتب كل سيريال في سطر جديد...',
+                              border: OutlineInputBorder(),
+                              alignLabelWithHint: true,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: qtyCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'العدد',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: descCtrl,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: 'الوصف',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
                 actions: [
@@ -360,265 +396,338 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
             });
           }
 
-          return AlertDialog(
-            title: Text(isEditing ? 'تعديل الإذن' : 'إذن تسليم جديد'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedClientId,
-                      decoration: const InputDecoration(labelText: 'العميل'),
-                      items: _clients
-                          .map(
-                            (c) => DropdownMenuItem(
-                              value: c['id'] as String,
-                              child: Text(c['name']),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (val) {
-                        selectedClientId = val;
-                        final c = _clients.firstWhere((e) => e['id'] == val);
-                        addressController.text = c['address'] ?? '';
-                      },
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              constraints: BoxConstraints(
+                maxWidth: 800,
+                maxHeight: MediaQuery.of(context).size.height * 0.9,
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    isEditing ? 'تعديل الإذن' : 'إذن تسليم جديد',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
                     ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: manualNoController,
+                  ),
+                  const SizedBox(height: 20),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          DropdownButtonFormField<String>(
+                            initialValue: selectedClientId,
                             decoration: const InputDecoration(
-                              labelText: 'رقم الإذن',
+                              labelText: 'العميل',
                               border: OutlineInputBorder(),
                             ),
+                            items: _clients
+                                .map(
+                                  (c) => DropdownMenuItem(
+                                    value: c['id'] as String,
+                                    child: Text(c['name']),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (val) {
+                              selectedClientId = val;
+                              final c = _clients.firstWhere(
+                                (e) => e['id'] == val,
+                              );
+                              addressController.text = c['address'] ?? '';
+                            },
                           ),
-                        ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: TextField(
-                            controller: supplyOrderNumber,
-                            decoration: const InputDecoration(
-                              labelText: 'أمر توريد رئيسي',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    InkWell(
-                      onTap: () async {
-                        final d = await showDatePicker(
-                          context: context,
-                          initialDate: selectedDate,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2030),
-                        );
-                        if (d != null) {
-                          setStateSB(() {
-                            selectedDate = d;
-                            manualNoController.text = _formatDateForSerial(d);
-                          });
-                        }
-                      },
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'تاريخ التسليم',
-                          border: OutlineInputBorder(),
-                        ),
-                        child: Text(
-                          "${selectedDate.year}-${selectedDate.month}-${selectedDate.day}",
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: addressController,
-                      decoration: const InputDecoration(
-                        labelText: 'العنوان',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const Divider(),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "الأصناف",
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        TextButton.icon(
-                          onPressed: addSection,
-                          icon: const Icon(Icons.add),
-                          label: const Text("فرعي جديد"),
-                        ),
-                      ],
-                    ),
-                    ...activeSections.map((sectionName) {
-                      List<Map<String, dynamic>> sectionItems = tempItems.where(
-                        (item) {
-                          String itemSection = item['relatedSupplyOrder'] ?? '';
-                          return itemSection == sectionName;
-                        },
-                      ).toList();
-                      bool isMain = sectionName.isEmpty;
-                      String displayTitle = isMain
-                          ? "عام / الرئيسي"
-                          : "أمر توريد: $sectionName";
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        decoration: BoxDecoration(
-                          color: cardColor,
-                          border: Border.all(
-                            color: Colors.grey.withOpacity(0.5),
-                          ),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isMain
-                                    ? mainHeaderColor
-                                    : subHeaderColor,
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(8),
-                                  topRight: Radius.circular(8),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: manualNoController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'رقم الإذن',
+                                    border: OutlineInputBorder(),
+                                  ),
                                 ),
                               ),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: TextField(
+                                  controller: supplyOrderNumber,
+                                  decoration: const InputDecoration(
+                                    labelText: 'أمر توريد رئيسي',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          InkWell(
+                            onTap: () async {
+                              final d = await showDatePicker(
+                                context: context,
+                                initialDate: selectedDate,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime(2030),
+                              );
+                              if (d != null) {
+                                setStateSB(() {
+                                  selectedDate = d;
+                                  manualNoController.text =
+                                      _formatDateForSerial(d);
+                                });
+                              }
+                            },
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: 'تاريخ التسليم',
+                                border: OutlineInputBorder(),
+                              ),
+                              child: Text(
+                                "${selectedDate.year}-${selectedDate.month}-${selectedDate.day}",
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: addressController,
+                            decoration: const InputDecoration(
+                              labelText: 'العنوان',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          const Divider(),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                "الأصناف",
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              TextButton.icon(
+                                onPressed: addSection,
+                                icon: const Icon(Icons.add),
+                                label: const Text("فرعي جديد"),
+                              ),
+                            ],
+                          ),
+                          ...activeSections.map((sectionName) {
+                            List<Map<String, dynamic>> sectionItems = tempItems
+                                .where((item) {
+                                  String itemSection =
+                                      item['relatedSupplyOrder'] ?? '';
+                                  return itemSection == sectionName;
+                                })
+                                .toList();
+                            bool isMain = sectionName.isEmpty;
+                            String displayTitle = isMain
+                                ? "عام / الرئيسي"
+                                : "أمر توريد: $sectionName";
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              decoration: BoxDecoration(
+                                color: cardColor,
+                                border: Border.all(
+                                  color: Colors.grey.withOpacity(0.5),
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
                                 children: [
-                                  Text(
-                                    displayTitle,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: textColor,
-                                      fontSize: 15,
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isMain
+                                          ? mainHeaderColor
+                                          : subHeaderColor,
+                                      borderRadius: const BorderRadius.only(
+                                        topLeft: Radius.circular(8),
+                                        topRight: Radius.circular(8),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          displayTitle,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: textColor,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        Row(
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.add_circle,
+                                                color: Colors.green,
+                                              ),
+                                              onPressed: () =>
+                                                  addItemToSection(sectionName),
+                                            ),
+                                            if (!isMain)
+                                              IconButton(
+                                                icon: const Icon(
+                                                  Icons.delete,
+                                                  color: Colors.red,
+                                                ),
+                                                onPressed: () =>
+                                                    deleteSection(sectionName),
+                                              ),
+                                          ],
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  Row(
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.add_circle,
-                                          color: Colors.green,
+                                  if (sectionItems.isNotEmpty)
+                                    ...sectionItems.map((item) {
+                                      final realIdx = tempItems.indexOf(item);
+                                      return ListTile(
+                                        dense: true,
+                                        title: Text(
+                                          item['productName'],
+                                          style: TextStyle(
+                                            color: textColor,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
-                                        onPressed: () =>
-                                            addItemToSection(sectionName),
-                                      ),
-                                      if (!isMain)
-                                        IconButton(
+                                        trailing: IconButton(
                                           icon: const Icon(
-                                            Icons.delete,
+                                            Icons.close,
                                             color: Colors.red,
                                           ),
-                                          onPressed: () =>
-                                              deleteSection(sectionName),
+                                          onPressed: () => setStateSB(
+                                            () => tempItems.removeAt(realIdx),
+                                          ),
                                         ),
-                                    ],
+                                      );
+                                    }).toList(),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('إلغاء'),
+                      ),
+                      const SizedBox(width: 10),
+                      // هذا الكود يوضع مكان زر الحفظ القديم
+                      ElevatedButton.icon(
+                        icon: Icon(isEditing ? Icons.edit : Icons.save),
+                        label: Text(isEditing ? 'تعديل وحفظ' : 'حفظ جديد'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue[800],
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () async {
+                          // دالة الحفظ الفعلية
+                          Future<void> submitOrder() async {
+                            if (selectedClientId != null &&
+                                supplyOrderNumber.text.isNotEmpty &&
+                                tempItems.isNotEmpty) {
+                              if (isEditing) {
+                                await SalesService().updateDeliveryOrder(
+                                  existingOrder['id'],
+                                  selectedClientId!,
+                                  supplyOrderNumber.text,
+                                  manualNoController.text,
+                                  addressController.text,
+                                  selectedDate.toIso8601String(),
+                                  notesController.text,
+                                  tempItems,
+                                );
+                              } else {
+                                await SalesService().createDeliveryOrder(
+                                  selectedClientId!,
+                                  supplyOrderNumber.text,
+                                  manualNoController.text,
+                                  addressController.text,
+                                  selectedDate.toIso8601String(),
+                                  notesController.text,
+                                  tempItems,
+                                );
+                              }
+                              Navigator.pop(ctx);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    isEditing
+                                        ? 'تم التعديل بنجاح ✅'
+                                        : 'تم الحفظ بنجاح ✅',
+                                  ),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('برجاء استكمال البيانات'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+
+                          // ✅ التحقق من عدد العناصر قبل الحفظ
+                          if (tempItems.length > 7) {
+                            showDialog(
+                              context: context,
+                              builder: (alertCtx) => AlertDialog(
+                                title: const Text("تنبيه: عدد الأصناف كبير"),
+                                content: Text(
+                                  "عدد الأصناف الحالي (${tempItems.length}) قد يتجاوز مساحة الصفحة الواحدة في ملف PDF.\n\nهل تريد المتابعة والحفظ؟",
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(alertCtx),
+                                    child: const Text("مراجعة"),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.pop(alertCtx); // إغلاق التحذير
+                                      submitOrder(); // تنفيذ الحفظ
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange,
+                                    ),
+                                    child: const Text(
+                                      "حفظ على أي حال",
+                                      style: TextStyle(color: Colors.white),
+                                    ),
                                   ),
                                 ],
                               ),
-                            ),
-                            if (sectionItems.isNotEmpty)
-                              ...sectionItems.map((item) {
-                                final realIdx = tempItems.indexOf(item);
-                                return ListTile(
-                                  dense: true,
-                                  title: Text(
-                                    item['productName'],
-                                    style: TextStyle(
-                                      color: textColor,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  trailing: IconButton(
-                                    icon: const Icon(
-                                      Icons.close,
-                                      color: Colors.red,
-                                    ),
-                                    onPressed: () => setStateSB(
-                                      () => tempItems.removeAt(realIdx),
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ],
-                ),
+                            );
+                          } else {
+                            // لو العدد تمام، احفظ علطول
+                            submitOrder();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('إلغاء'),
-              ),
-              ElevatedButton.icon(
-                icon: Icon(isEditing ? Icons.edit : Icons.save),
-                label: Text(isEditing ? 'تعديل وحفظ' : 'حفظ جديد'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[800],
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () async {
-                  if (selectedClientId != null &&
-                      supplyOrderNumber.text.isNotEmpty &&
-                      tempItems.isNotEmpty) {
-                    if (isEditing) {
-                      await PBHelper().updateDeliveryOrder(
-                        existingOrder['id'],
-                        selectedClientId!,
-                        supplyOrderNumber.text,
-                        manualNoController.text,
-                        addressController.text,
-                        selectedDate.toIso8601String(),
-                        notesController.text,
-                        tempItems,
-                      );
-                    } else {
-                      await PBHelper().createDeliveryOrder(
-                        selectedClientId!,
-                        supplyOrderNumber.text,
-                        manualNoController.text,
-                        addressController.text,
-                        selectedDate.toIso8601String(),
-                        notesController.text,
-                        tempItems,
-                      );
-                    }
-                    Navigator.pop(ctx);
-                    _loadData();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          isEditing ? 'تم التعديل بنجاح ✅' : 'تم الحفظ بنجاح ✅',
-                        ),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('برجاء استكمال البيانات'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                },
-              ),
-            ],
           );
         },
       ),
@@ -626,7 +735,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
   }
 
   void _deleteOrder(String id, bool isLocked) {
-    if (!_canDelete) return; // حماية
+    if (!_canDelete) return;
 
     if (isLocked) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -649,9 +758,9 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
           ),
           TextButton(
             onPressed: () async {
-              await PBHelper().deleteDeliveryOrder(id);
+              await SalesService().deleteDeliveryOrder(id);
               Navigator.pop(ctx);
-              _loadData();
+              // _loadData(); // ❌ لا حاجة له
             },
             child: const Text("حذف", style: TextStyle(color: Colors.red)),
           ),
@@ -661,7 +770,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
   }
 
   void _toggleLock(String id, bool currentStatus) async {
-    // حماية: القفل والفتح يعتبر تعديل
     if (!_canAdd) {
       ScaffoldMessenger.of(
         context,
@@ -670,8 +778,8 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     }
 
     if (currentStatus) {
-      await PBHelper().toggleOrderLock(id, false);
-      _loadData();
+      await SalesService().toggleOrderLock(id, false);
+      // _loadData(); // ❌ لا حاجة له
     } else {
       showDialog(
         context: context,
@@ -682,8 +790,8 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
             TextButton(
               onPressed: () async {
                 Navigator.pop(ctx);
-                await PBHelper().toggleOrderLock(id, true);
-                _loadData();
+                await SalesService().toggleOrderLock(id, true);
+                // _loadData(); // ❌ لا حاجة له
               },
               child: const Text("لا (قفل فقط)"),
             ),
@@ -701,12 +809,12 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                   source: ImageSource.gallery,
                 );
                 if (image != null) {
-                  await PBHelper().toggleOrderLock(
+                  await SalesService().toggleOrderLock(
                     id,
                     true,
                     imagePath: image.path,
                   );
-                  _loadData();
+                  // _loadData(); // ❌ لا حاجة له
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('تم رفع الصورة وقفل الإذن ✅'),
@@ -723,7 +831,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
   }
 
   void _manageImage(String orderId, String imagePath) {
-    // حماية إدارة الصور
     if (!_canAdd) return;
 
     showModalBottomSheet(
@@ -761,8 +868,8 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                   source: ImageSource.gallery,
                 );
                 if (image != null) {
-                  await PBHelper().updateOrderImage(orderId, image.path);
-                  _loadData();
+                  await SalesService().updateOrderImage(orderId, image.path);
+                  // _loadData(); // ❌ لا حاجة له
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('تم تغيير الصورة بنجاح ✅'),
@@ -789,9 +896,9 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                       ),
                       TextButton(
                         onPressed: () async {
-                          await PBHelper().updateOrderImage(orderId, null);
+                          await SalesService().updateOrderImage(orderId, null);
                           Navigator.pop(alertCtx);
-                          _loadData();
+                          // _loadData(); // ❌ لا حاجة له
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('تم حذف الصورة 🗑️'),
@@ -823,289 +930,304 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
       appBar: AppBar(title: const Text('أذونات التسليم')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      labelText: 'بحث...',
-                      prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      filled: true,
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          _filterOrders('');
-                        },
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 900),
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          labelText: 'بحث...',
+                          prefixIcon: const Icon(Icons.search),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          filled: true,
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              _filterOrders('');
+                            },
+                          ),
+                        ),
+                        onChanged: _filterOrders,
                       ),
                     ),
-                    onChanged: _filterOrders,
-                  ),
-                ),
-                Expanded(
-                  child: _groupedOrders.isEmpty
-                      ? const Center(child: Text("لا توجد نتائج"))
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          itemCount: _groupedOrders.length,
-                          itemBuilder: (context, index) {
-                            String clientName = _groupedOrders.keys.elementAt(
-                              index,
-                            );
-                            List<Map<String, dynamic>> clientOrders =
-                                _groupedOrders[clientName]!;
-                            return Card(
-                              elevation: 2,
-                              margin: const EdgeInsets.only(bottom: 10),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                side: BorderSide(
-                                  color: Colors.blue.withOpacity(0.3),
-                                  width: 1,
-                                ),
+                    Expanded(
+                      child: _groupedOrders.isEmpty
+                          ? const Center(child: Text("لا توجد نتائج"))
+                          : ListView.builder(
+                              padding: const EdgeInsets.only(
+                                left: 10,
+                                right: 10,
+                                bottom: 100,
                               ),
-                              child: ExpansionTile(
-                                initiallyExpanded: true,
-                                shape: const Border(),
-                                title: Text(
-                                  clientName,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color: isDark
-                                        ? Colors.blue[200]
-                                        : Colors.blue[900],
+                              itemCount: _groupedOrders.length,
+                              itemBuilder: (context, index) {
+                                String clientName = _groupedOrders.keys
+                                    .elementAt(index);
+                                List<Map<String, dynamic>> clientOrders =
+                                    _groupedOrders[clientName]!;
+                                return Card(
+                                  elevation: 2,
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: BorderSide(
+                                      color: Colors.blue.withOpacity(0.3),
+                                      width: 1,
+                                    ),
                                   ),
-                                ),
-                                leading: const Icon(
-                                  Icons.business,
-                                  color: Colors.orange,
-                                ),
-                                backgroundColor: isDark
-                                    ? Colors.grey[850]
-                                    : Colors.blue[50]?.withOpacity(0.3),
-                                childrenPadding: const EdgeInsets.all(5),
-                                children: clientOrders.map((order) {
-                                  bool isLocked = order['isLocked'] == true;
-                                  bool hasImage =
-                                      order['signedImagePath'] != null &&
-                                      order['signedImagePath']
-                                          .toString()
-                                          .isNotEmpty;
-                                  Color tileColor = isLocked
-                                      ? (isDark
-                                            ? Colors.green.withOpacity(0.15)
-                                            : Colors.green[50]!)
-                                      : Theme.of(context).cardColor;
-                                  return Card(
-                                    elevation: 2,
-                                    margin: const EdgeInsets.only(
-                                      bottom: 8,
-                                      left: 5,
-                                      right: 5,
+                                  child: ExpansionTile(
+                                    initiallyExpanded: true,
+                                    shape: const Border(),
+                                    title: Text(
+                                      clientName,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: isDark
+                                            ? Colors.blue[200]
+                                            : Colors.blue[900],
+                                      ),
                                     ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
+                                    leading: const Icon(
+                                      Icons.business,
+                                      color: Colors.orange,
                                     ),
-                                    color: tileColor,
-                                    child: ExpansionTile(
-                                      leading: CircleAvatar(
-                                        backgroundColor: isLocked
-                                            ? Colors.green
-                                            : Colors.blue,
-                                        child: Icon(
-                                          isLocked
-                                              ? Icons.check
-                                              : Icons.description,
-                                          color: Colors.white,
+                                    backgroundColor: isDark
+                                        ? Colors.grey[850]
+                                        : Colors.blue[50]?.withOpacity(0.3),
+                                    childrenPadding: const EdgeInsets.all(5),
+                                    children: clientOrders.map((order) {
+                                      bool isLocked = order['isLocked'] == true;
+                                      bool hasImage =
+                                          order['signedImagePath'] != null &&
+                                          order['signedImagePath']
+                                              .toString()
+                                              .isNotEmpty;
+                                      Color tileColor = isLocked
+                                          ? (isDark
+                                                ? Colors.green.withOpacity(0.15)
+                                                : Colors.green[50]!)
+                                          : Theme.of(context).cardColor;
+                                      return Card(
+                                        elevation: 2,
+                                        margin: const EdgeInsets.only(
+                                          bottom: 8,
+                                          left: 5,
+                                          right: 5,
                                         ),
-                                      ),
-                                      title: Text(
-                                        "رقم الإذن: ${order['manualNo'] ?? '---'}",
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                         ),
-                                      ),
-                                      subtitle: Text(
-                                        "أوامر توريد: ${order['displaySupplyOrders']}",
-                                        style: TextStyle(
-                                          color: isLocked
-                                              ? Colors.green
-                                              : Colors.blue,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.all(15.0),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                "التاريخ: ${order['date'].toString().split(' ')[0]}",
+                                        color: tileColor,
+                                        child: ExpansionTile(
+                                          leading: CircleAvatar(
+                                            backgroundColor: isLocked
+                                                ? Colors.green
+                                                : Colors.blue,
+                                            child: Icon(
+                                              isLocked
+                                                  ? Icons.check
+                                                  : Icons.description,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          title: Text(
+                                            "رقم الإذن: ${order['manualNo'] ?? '---'}",
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            "أوامر توريد: ${order['displaySupplyOrders']}",
+                                            style: TextStyle(
+                                              color: isLocked
+                                                  ? Colors.green
+                                                  : Colors.blue,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.all(
+                                                15.0,
                                               ),
-                                              const Divider(),
-                                              Row(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .spaceBetween,
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
                                                 children: [
-                                                  Row(
-                                                    children: [
-                                                      Switch(
-                                                        value: isLocked,
-                                                        activeThumbColor:
-                                                            Colors.green,
-                                                        onChanged: (val) =>
-                                                            _toggleLock(
-                                                              order['id'],
-                                                              isLocked,
-                                                            ),
-                                                      ),
-                                                      Text(
-                                                        isLocked
-                                                            ? "مغلق"
-                                                            : "تعديل",
-                                                        style: TextStyle(
-                                                          fontSize: 12,
-                                                          color: isLocked
-                                                              ? Colors.green
-                                                              : Colors.grey,
-                                                        ),
-                                                      ),
-                                                      if (hasImage)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets.only(
-                                                                right: 8.0,
-                                                              ),
-                                                          child: IconButton(
-                                                            icon: const Icon(
-                                                              Icons.image,
-                                                              color:
-                                                                  Colors.purple,
-                                                            ),
-                                                            tooltip:
-                                                                "عرض الصورة",
-                                                            onPressed: () {
-                                                              if (isLocked) {
-                                                                showDialog(
-                                                                  context:
-                                                                      context,
-                                                                  builder: (_) => Dialog(
-                                                                    child: Image.network(
-                                                                      order['signedImagePath'],
-                                                                      fit: BoxFit
-                                                                          .contain,
-                                                                    ),
-                                                                  ),
-                                                                );
-                                                              } else {
-                                                                _manageImage(
-                                                                  order['id'],
-                                                                  order['signedImagePath'],
-                                                                );
-                                                              }
-                                                            },
-                                                          ),
-                                                        ),
-                                                    ],
+                                                  Text(
+                                                    "التاريخ: ${order['date'].toString().split(' ')[0]}",
                                                   ),
+                                                  const Divider(),
                                                   Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .spaceBetween,
                                                     children: [
-                                                      // زر الحذف (يخضع للصلاحية)
-                                                      if (_canDelete)
-                                                        IconButton(
-                                                          icon: Icon(
-                                                            Icons.delete,
-                                                            color: isLocked
-                                                                ? Colors.grey
-                                                                : Colors.red,
+                                                      Row(
+                                                        children: [
+                                                          Switch(
+                                                            value: isLocked,
+                                                            activeThumbColor:
+                                                                Colors.green,
+                                                            onChanged: (val) =>
+                                                                _toggleLock(
+                                                                  order['id'],
+                                                                  isLocked,
+                                                                ),
                                                           ),
-                                                          onPressed: () =>
-                                                              _deleteOrder(
-                                                                order['id'],
-                                                                isLocked,
+                                                          Text(
+                                                            isLocked
+                                                                ? "مغلق"
+                                                                : "تعديل",
+                                                            style: TextStyle(
+                                                              fontSize: 12,
+                                                              color: isLocked
+                                                                  ? Colors.green
+                                                                  : Colors.grey,
+                                                            ),
+                                                          ),
+                                                          if (hasImage)
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets.only(
+                                                                    right: 8.0,
+                                                                  ),
+                                                              child: IconButton(
+                                                                icon: const Icon(
+                                                                  Icons.image,
+                                                                  color: Colors
+                                                                      .purple,
+                                                                ),
+                                                                tooltip:
+                                                                    "عرض الصورة",
+                                                                onPressed: () {
+                                                                  if (isLocked) {
+                                                                    showDialog(
+                                                                      context:
+                                                                          context,
+                                                                      builder: (_) => Dialog(
+                                                                        child: Image.network(
+                                                                          order['signedImagePath'],
+                                                                          fit: BoxFit
+                                                                              .contain,
+                                                                        ),
+                                                                      ),
+                                                                    );
+                                                                  } else {
+                                                                    _manageImage(
+                                                                      order['id'],
+                                                                      order['signedImagePath'],
+                                                                    );
+                                                                  }
+                                                                },
                                                               ),
-                                                        ),
-
-                                                      // زر التعديل (يخضع للصلاحية)
-                                                      if (_canAdd)
-                                                        IconButton(
-                                                          icon: Icon(
-                                                            Icons.edit,
-                                                            color: isLocked
-                                                                ? Colors.grey
-                                                                : Colors.orange,
-                                                          ),
-                                                          onPressed: isLocked
-                                                              ? null
-                                                              : () async {
-                                                                  List<
-                                                                    Map<
-                                                                      String,
-                                                                      dynamic
-                                                                    >
-                                                                  >
-                                                                  orderItems =
-                                                                      await PBHelper()
-                                                                          .getDeliveryOrderItems(
+                                                            ),
+                                                        ],
+                                                      ),
+                                                      Row(
+                                                        children: [
+                                                          if (_canDelete)
+                                                            IconButton(
+                                                              icon: Icon(
+                                                                Icons.delete,
+                                                                color: isLocked
+                                                                    ? Colors
+                                                                          .grey
+                                                                    : Colors
+                                                                          .red,
+                                                              ),
+                                                              onPressed: () =>
+                                                                  _deleteOrder(
+                                                                    order['id'],
+                                                                    isLocked,
+                                                                  ),
+                                                            ),
+                                                          if (_canAdd)
+                                                            IconButton(
+                                                              icon: Icon(
+                                                                Icons.edit,
+                                                                color: isLocked
+                                                                    ? Colors
+                                                                          .grey
+                                                                    : Colors
+                                                                          .orange,
+                                                              ),
+                                                              onPressed:
+                                                                  isLocked
+                                                                  ? null
+                                                                  : () async {
+                                                                      List<
+                                                                        Map<
+                                                                          String,
+                                                                          dynamic
+                                                                        >
+                                                                      >
+                                                                      orderItems =
+                                                                          await SalesService().getDeliveryOrderItems(
                                                                             order['id'],
                                                                           );
-                                                                  _showOrderDialog(
-                                                                    existingOrder:
-                                                                        order,
-                                                                    existingItems:
-                                                                        orderItems,
-                                                                  );
-                                                                },
-                                                        ),
-
-                                                      IconButton(
-                                                        icon: const Icon(
-                                                          Icons.print,
-                                                          color: Colors.blue,
-                                                        ),
-                                                        onPressed: () async {
-                                                          List<
-                                                            Map<String, dynamic>
-                                                          >
-                                                          orderItems =
-                                                              await PBHelper()
-                                                                  .getDeliveryOrderItems(
-                                                                    order['id'],
-                                                                  );
-                                                          await PdfService.generateDeliveryOrderPdf(
-                                                            order,
-                                                            orderItems,
-                                                          );
-                                                        },
+                                                                      _showOrderDialog(
+                                                                        existingOrder:
+                                                                            order,
+                                                                        existingItems:
+                                                                            orderItems,
+                                                                      );
+                                                                    },
+                                                            ),
+                                                          IconButton(
+                                                            icon: const Icon(
+                                                              Icons.print,
+                                                              color:
+                                                                  Colors.blue,
+                                                            ),
+                                                            onPressed: () async {
+                                                              List<
+                                                                Map<
+                                                                  String,
+                                                                  dynamic
+                                                                >
+                                                              >
+                                                              orderItems =
+                                                                  await SalesService()
+                                                                      .getDeliveryOrderItems(
+                                                                        order['id'],
+                                                                      );
+                                                              await PdfService.generateDeliveryOrderPdf(
+                                                                order,
+                                                                orderItems,
+                                                              );
+                                                            },
+                                                          ),
+                                                        ],
                                                       ),
                                                     ],
                                                   ),
                                                 ],
                                               ),
-                                            ],
-                                          ),
+                                            ),
+                                          ],
                                         ),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                            );
-                          },
-                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-      // ✅ 3. زر الإضافة العائم (يخضع للصلاحية)
       floatingActionButton: _canAdd
           ? FloatingActionButton(
               onPressed: () => _showOrderDialog(),

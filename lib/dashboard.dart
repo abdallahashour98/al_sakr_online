@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
-import 'pb_helper.dart';
+import 'package:badges/badges.dart' as badges;
+import 'package:shared_preferences/shared_preferences.dart'; // ✅ 1. إضافة المكتبة
+import 'services/notice_service.dart';
+import 'notices_screen.dart';
+import 'notification_service.dart';
+import 'update_service.dart';
 
-// ✅ استيراد جميع الشاشات
+// ✅ استيراد باقي الشاشات
 import 'sales_screen.dart';
 import 'store_screen.dart';
 import 'clients_screen.dart';
 import 'suppliers_screen.dart';
 import 'purchase_screen.dart';
 import 'purchase_history_screen.dart';
-import 'reports_screen.dart'; // سجل المبيعات
-import 'GeneralReportsScreen.dart'; // التقارير الشاملة
+import 'reports_screen.dart';
+import 'GeneralReportsScreen.dart';
 import 'delivery_orders_screen.dart';
 import 'returns_list_screen.dart';
 import 'expenses_screen.dart';
 import 'settings_screen.dart';
 
+// موديل عنصر القائمة
 class MenuItem {
   final String title;
   final IconData icon;
@@ -40,21 +46,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLoading = true;
   Map<String, dynamic> _currentUserData = {};
 
+  // المتغير الافتراضي
+  bool _isGridView = true;
+
+  late Stream<int> _unreadStream;
   final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
+    NotificationService.init();
+    _unreadStream = NoticeService().getUnreadCountStream();
+
+    // ✅ 2. تحميل وضع العرض المحفوظ فوراً عند الفتح
+    _loadViewPreference();
+
     _loadUserData();
     _subscribeToUserUpdates();
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) UpdateService().checkForUpdate(context);
+    });
+  }
+
+  // ✅ دالة قراءة الوضع المحفوظ
+  Future<void> _loadViewPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        // لو مفيش قيمة محفوظة، ارجع للوضع الافتراضي (true أي شبكة)
+        _isGridView = prefs.getBool('dashboard_view_mode') ?? true;
+      });
+    }
+  }
+
+  // ✅ دالة تغيير الوضع وحفظه
+  Future<void> _toggleViewMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _isGridView = !_isGridView;
+    });
+    // حفظ القيمة الجديدة
+    await prefs.setBool('dashboard_view_mode', _isGridView);
   }
 
   Future<void> _loadUserData() async {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = NoticeService().pb.authStore.record?.id;
     if (myId == null) return;
 
     try {
-      final record = await PBHelper().pb.collection('users').getOne(myId);
+      final record = await NoticeService().pb.collection('users').getOne(myId);
       if (mounted) {
         setState(() {
           _currentUserData = record.data;
@@ -68,10 +108,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _subscribeToUserUpdates() {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = NoticeService().pb.authStore.record?.id;
     if (myId == null) return;
 
-    PBHelper().pb.collection('users').subscribe(myId, (e) {
+    NoticeService().pb.collection('users').subscribe(myId, (e) {
       if (e.record != null && mounted) {
         setState(() {
           _currentUserData = e.record!.data;
@@ -82,16 +122,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    final myId = PBHelper().pb.authStore.record?.id;
+    final myId = NoticeService().pb.authStore.record?.id;
     if (myId != null) {
-      PBHelper().pb.collection('users').unsubscribe(myId);
+      NoticeService().pb.collection('users').unsubscribe(myId);
     }
+    NoticeService().pb.collection('announcements').unsubscribe();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = PBHelper().pb.authStore.record;
+    final currentUser = NoticeService().pb.authStore.record;
     final bool amISuperAdmin = (currentUser?.id == _superAdminId);
 
     final List<MenuItem> menuItems = [];
@@ -110,7 +151,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
 
-    // --- المبيعات ---
     addIfAllowed(
       'فاتورة مبيعات',
       Icons.point_of_sale,
@@ -125,7 +165,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       const PurchaseScreen(),
       'show_purchases',
     );
-
     addIfAllowed(
       'المخزن والأصناف',
       Icons.inventory_2,
@@ -147,7 +186,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       const ClientsScreen(),
       'show_clients',
     );
-
     addIfAllowed(
       'إدارة الموردين',
       Icons.local_shipping,
@@ -162,7 +200,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       const ReportsScreen(),
       'show_sales_history',
     );
-
     addIfAllowed(
       'سجل المشتريات',
       Icons.receipt_long,
@@ -170,8 +207,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       const PurchaseHistoryScreen(),
       'show_purchase_history',
     );
-
-    // --- المصروفات والتقارير ---
     addIfAllowed(
       'المصروفات',
       Icons.money_off,
@@ -180,21 +215,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       'show_expenses',
     );
     addIfAllowed(
-      'التقارير الشاملة',
-      Icons.bar_chart,
-      const Color(0xFFFBC02D),
-      const GeneralReportsScreen(),
-      'show_reports',
-    );
-    addIfAllowed(
       'أذونات التسليم',
       Icons.receipt,
       Colors.redAccent,
       const DeliveryOrdersScreen(),
       'show_delivery',
     );
+    addIfAllowed(
+      'التقارير الشاملة',
+      Icons.bar_chart,
+      const Color(0xFFFBC02D),
+      const GeneralReportsScreen(),
+      'show_reports',
+    );
 
-    // --- الإعدادات ---
     menuItems.add(
       MenuItem(
         title: 'الإعدادات',
@@ -204,59 +238,133 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
 
-    // ❌❌❌ هنا التغيير: شيلنا Directionality عشان الاتجاه يتغير حسب اللغة
     return Scaffold(
       backgroundColor: Theme.of(context).brightness == Brightness.dark
           ? const Color(0xFF121212)
           : Colors.grey[100],
+
+      appBar: AppBar(
+        title: const Text("لوحة التحكم"),
+        centerTitle: false,
+        actions: [
+          // ✅ 3. استخدام دالة التبديل الجديدة هنا
+          IconButton(
+            onPressed: _toggleViewMode,
+            icon: Icon(
+              _isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded,
+            ),
+            tooltip: _isGridView ? "عرض كقائمة" : "عرض كشبكة",
+          ),
+
+          StreamBuilder<int>(
+            stream: _unreadStream,
+            initialData: 0,
+            builder: (context, snapshot) {
+              int count = snapshot.data ?? 0;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                child: badges.Badge(
+                  position: badges.BadgePosition.topEnd(top: 0, end: 3),
+                  showBadge: count > 0,
+                  badgeContent: Text(
+                    count > 99 ? "+99" : count.toString(),
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                  badgeAnimation: const badges.BadgeAnimation.scale(),
+                  child: IconButton(
+                    icon: const Icon(Icons.notifications_outlined),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (c) => const NoticesScreen(),
+                        ),
+                      ).then((_) {
+                        setState(() {
+                          _unreadStream = NoticeService()
+                              .getUnreadCountStream();
+                        });
+                      });
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              children: [
+                if (MediaQuery.of(context).size.width > 600)
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        "${currentUser?.data['name'] ?? 'مستخدم'}",
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Text(
+                        "أهلاً بك",
+                        style: TextStyle(fontSize: 10, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                const SizedBox(width: 8),
+                const CircleAvatar(radius: 18, child: Icon(Icons.person)),
+              ],
+            ),
+          ),
+        ],
+      ),
 
       body: (_isLoading && !amISuperAdmin)
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 15),
-                      child: Text(
-                        "${currentUser?.data['name'] ?? 'مستخدم'} أهلاً بك ",
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    int crossAxisCount;
+                    double childAspectRatio;
 
-                    Expanded(
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          int crossAxisCount = 2;
-                          double width = constraints.maxWidth;
-                          if (width > 1200)
-                            crossAxisCount = 5;
-                          else if (width > 900)
-                            crossAxisCount = 4;
-                          else if (width > 600)
-                            crossAxisCount = 3;
+                    if (_isGridView) {
+                      double width = constraints.maxWidth;
+                      if (width > 1200) {
+                        crossAxisCount = 5;
+                      } else if (width > 900) {
+                        crossAxisCount = 4;
+                      } else if (width > 600) {
+                        crossAxisCount = 3;
+                      } else {
+                        crossAxisCount = 2;
+                      }
+                      childAspectRatio = 1.1;
+                    } else {
+                      crossAxisCount = 1;
+                      childAspectRatio = constraints.maxWidth / 80;
+                    }
 
-                          return GridView.builder(
-                            itemCount: menuItems.length,
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: crossAxisCount,
-                                  crossAxisSpacing: 15,
-                                  mainAxisSpacing: 15,
-                                  childAspectRatio: 1.1,
-                                ),
-                            itemBuilder: (context, index) {
-                              return DashboardCard(item: menuItems[index]);
-                            },
-                          );
-                        },
+                    return GridView.builder(
+                      itemCount: menuItems.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        crossAxisSpacing: 15,
+                        mainAxisSpacing: 15,
+                        childAspectRatio: childAspectRatio,
                       ),
-                    ),
-                  ],
+                      itemBuilder: (context, index) {
+                        return DashboardCard(
+                          item: menuItems[index],
+                          isListView: !_isGridView,
+                        );
+                      },
+                    );
+                  },
                 ),
               ),
             ),
@@ -266,11 +374,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 class DashboardCard extends StatelessWidget {
   final MenuItem item;
-  const DashboardCard({super.key, required this.item});
+  final bool isListView;
+
+  const DashboardCard({super.key, required this.item, this.isListView = false});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    Widget cardContent;
+
+    if (isListView) {
+      cardContent = Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: item.color.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(item.icon, size: 28, color: item.color),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              item.title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white70 : Colors.grey[800],
+              ),
+            ),
+          ),
+          if (!isDark)
+            Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[300]),
+          const SizedBox(width: 20),
+        ],
+      );
+    } else {
+      cardContent = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: item.color.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(item.icon, size: 32, color: item.color),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4.0),
+            child: Text(
+              item.title,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white70 : Colors.grey[800],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Card(
       elevation: 4,
       shadowColor: item.color.withOpacity(0.3),
@@ -293,34 +465,7 @@ class DashboardCard extends StatelessWidget {
                   : [item.color.withOpacity(0.08), Colors.white],
             ),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: item.color.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(item.icon, size: 32, color: item.color),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                child: Text(
-                  item.title,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white70 : Colors.grey[800],
-                  ),
-                ),
-              ),
-            ],
-          ),
+          child: cardContent,
         ),
       ),
     );

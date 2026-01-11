@@ -4,7 +4,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'pb_helper.dart'; // ✅ استبدال المكتبة
+import 'services/sales_service.dart';
+import 'services/purchases_service.dart';
+import 'services/inventory_service.dart';
 
 class ExcelService {
   // ✅ لم نعد بحاجة لـ DatabaseHelper
@@ -21,7 +23,7 @@ class ExcelService {
       _addSheet(
         excel,
         'المخزن',
-        await PBHelper().getProducts(), // ✅ جلب من PB
+        await InventoryService().getProducts(), // ✅ جلب من PB
         [
           'id',
           'name',
@@ -48,7 +50,7 @@ class ExcelService {
       _addSheet(
         excel,
         'سجل المبيعات',
-        await PBHelper().getSales(), // ✅ دالة موجودة في PBHelper
+        await SalesService().getSales(), // ✅ دالة موجودة في PBHelper
         [
           'id',
           'clientName', // تأكد أن PBHelper يرجع الاسم عبر expand
@@ -73,7 +75,7 @@ class ExcelService {
       _addSheet(
         excel,
         'مرتجعات العملاء',
-        await PBHelper().getAllReturns(),
+        await SalesService().getReturns(),
         ['id', 'clientName', 'totalAmount', 'date'],
         ['رقم المرتجع', 'العميل', 'المبلغ المسترد', 'التاريخ'],
       );
@@ -82,7 +84,7 @@ class ExcelService {
       _addSheet(
         excel,
         'سجل المشتريات',
-        await PBHelper().getPurchasesWithNames(),
+        await PurchasesService().getPurchases(),
         [
           'id',
           'supplierName',
@@ -105,7 +107,7 @@ class ExcelService {
       _addSheet(
         excel,
         'مرتجعات الموردين',
-        await PBHelper().getAllPurchaseReturns(),
+        await PurchasesService().getAllPurchaseReturns(),
         ['id', 'invoiceId', 'supplierName', 'totalAmount', 'date'],
         ['رقم المرتجع', 'رقم الفاتورة الأصلية', 'المورد', 'المبلغ', 'التاريخ'],
       );
@@ -114,7 +116,7 @@ class ExcelService {
       _addSheet(
         excel,
         'حسابات العملاء',
-        await PBHelper().getClients(),
+        await SalesService().getClients(),
         ['id', 'name', 'phone', 'address', 'balance'],
         ['ID', 'اسم العميل', 'رقم الهاتف', 'العنوان', 'المديونية الحالية'],
       );
@@ -123,7 +125,7 @@ class ExcelService {
       _addSheet(
         excel,
         'حسابات الموردين',
-        await PBHelper().getSuppliers(),
+        await PurchasesService().getSuppliers(),
         ['id', 'name', 'phone', 'contactPerson', 'balance'],
         ['ID', 'اسم المورد', 'رقم الهاتف', 'المسئول', 'المديونية الحالية'],
       );
@@ -132,7 +134,7 @@ class ExcelService {
       _addSheet(
         excel,
         'المصروفات',
-        await PBHelper().getExpenses(),
+        await PurchasesService().getExpenses(),
         ['id', 'title', 'amount', 'category', 'date', 'notes'],
         ['ID', 'البند', 'المبلغ', 'التصنيف', 'التاريخ', 'ملاحظات'],
       );
@@ -272,7 +274,7 @@ class ExcelService {
             'notes': row[5]?.value?.toString() ?? '',
           };
           // المصروفات عادة لا تحدث، بل تضاف كجديد
-          await PBHelper().addExpense(data);
+          await PurchasesService().insertExpense(data);
           expCount++;
         }
       }
@@ -344,13 +346,13 @@ class ExcelService {
   ) async {
     if (_isValidId(id)) {
       try {
-        await PBHelper().updateProduct(id!, data, null);
+        await InventoryService().updateProduct(id!, data, null);
       } catch (e) {
         // إذا فشل التحديث (الـ ID غير موجود)، قم بالإضافة
-        await PBHelper().insertProduct(data, null);
+        await InventoryService().insertProduct(data, null);
       }
     } else {
-      await PBHelper().insertProduct(data, null);
+      await InventoryService().insertProduct(data, null);
     }
   }
 
@@ -360,12 +362,12 @@ class ExcelService {
   ) async {
     if (_isValidId(id)) {
       try {
-        await PBHelper().updateClient(id!, data);
+        await SalesService().updateClient(id!, data);
       } catch (e) {
-        await PBHelper().insertClient(data);
+        await SalesService().insertClient(data);
       }
     } else {
-      await PBHelper().insertClient(data);
+      await SalesService().insertClient(data);
     }
   }
 
@@ -375,12 +377,12 @@ class ExcelService {
   ) async {
     if (_isValidId(id)) {
       try {
-        await PBHelper().updateSupplier(id!, data);
+        await PurchasesService().updateSupplier(id!, data);
       } catch (e) {
-        await PBHelper().insertSupplier(data);
+        await PurchasesService().insertSupplier(data);
       }
     } else {
-      await PBHelper().insertSupplier(data);
+      await PurchasesService().insertSupplier(data);
     }
   }
 }
