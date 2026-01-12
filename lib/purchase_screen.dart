@@ -561,7 +561,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     bool isWide = MediaQuery.of(context).size.width > 600;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('فاتورة مشتريات')),
+      appBar: AppBar(title: const Text('فاتورة مشتريات'), centerTitle: true),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [

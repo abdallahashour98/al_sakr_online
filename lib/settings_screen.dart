@@ -118,7 +118,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Stack(
       children: [
         Scaffold(
-          appBar: AppBar(title: const Text('الإعدادات')),
+          appBar: AppBar(title: const Text('الإعدادات'), centerTitle: true),
           body: Padding(
             padding: const EdgeInsets.all(20.0),
             child: SingleChildScrollView(

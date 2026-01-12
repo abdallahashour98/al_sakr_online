@@ -7,7 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:pocketbase/pocketbase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'constants.dart';
+import 'services/constants.dart';
 
 // ⚠️ تأكد أن هذا الـ IP صحيح وثابت
 final String kBaseUrl = AppConfig.baseUrl;

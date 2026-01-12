@@ -226,7 +226,10 @@ class _StoreScreenState extends State<StoreScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('إدارة المخزن والأصناف')),
+      appBar: AppBar(
+        title: const Text('إدارة المخزن والأصناف'),
+        centerTitle: true,
+      ),
       body: Column(
         children: [
           // شريط البحث

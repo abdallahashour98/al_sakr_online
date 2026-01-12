@@ -194,10 +194,32 @@ class PurchasesService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getPurchases() async {
+  // دالة لتعديل رقم مرجع الفاتورة (للمشتريات)
+  Future<void> updatePurchaseReference(
+    String purchaseId,
+    String newRefNumber,
+  ) async {
+    try {
+      await pb
+          .collection('purchases')
+          .update(purchaseId, body: {'referenceNumber': newRefNumber});
+    } catch (e) {
+      throw Exception("فشل تعديل رقم المرجع: $e");
+    }
+  }
+
+  // ✅ تعديل: جلب المشتريات بفلتر التاريخ
+  Future<List<Map<String, dynamic>>> getPurchases({
+    String? startDate,
+    String? endDate,
+  }) async {
+    String filter = '';
+    if (startDate != null && endDate != null) {
+      filter = 'date >= "$startDate" && date <= "$endDate"';
+    }
     final records = await pb
         .collection('purchases')
-        .getFullList(sort: '-date', expand: 'supplier');
+        .getFullList(sort: '-date', expand: 'supplier', filter: filter);
     return records.map(PBHelper.recordToMap).toList();
   }
 
@@ -290,10 +312,18 @@ class PurchasesService {
     await batch.send();
   }
 
-  Future<List<Map<String, dynamic>>> getAllPurchaseReturns() async {
+  // ✅ تعديل: جلب مرتجعات المشتريات بفلتر التاريخ
+  Future<List<Map<String, dynamic>>> getAllPurchaseReturns({
+    String? startDate,
+    String? endDate,
+  }) async {
+    String filter = '';
+    if (startDate != null && endDate != null) {
+      filter = 'date >= "$startDate" && date <= "$endDate"';
+    }
     final records = await pb
         .collection('purchase_returns')
-        .getFullList(sort: '-date', expand: 'supplier');
+        .getFullList(sort: '-date', expand: 'supplier', filter: filter);
     return records.map(PBHelper.recordToMap).toList();
   }
 

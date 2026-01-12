@@ -144,7 +144,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
 
     return Scaffold(
       backgroundColor: bgColor,
-      appBar: AppBar(title: const Text('إدارة الموردين')),
+      appBar: AppBar(title: const Text('إدارة الموردين'), centerTitle: true),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: PBHelper().getCollectionStream('suppliers', sort: 'name'),
         builder: (context, snapshot) {
@@ -697,7 +697,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
                   // طريقة الدفع
                   DropdownButtonFormField<String>(
-                    value: paymentMethod,
+                    initialValue: paymentMethod,
                     dropdownColor: isDark
                         ? const Color(0xFF333333)
                         : Colors.white,

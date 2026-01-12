@@ -39,6 +39,30 @@ class InventoryService {
     return await pb.collection('products').create(body: body, files: files);
   }
 
+  // ✅ دالة حساب إجمالي قيمة المخزون (الكمية * سعر الشراء)
+  Future<double> getInventoryValue() async {
+    try {
+      // جلب كل المنتجات
+      final products = await pb.collection('products').getFullList();
+      double totalValue = 0.0;
+
+      for (var p in products) {
+        double stock = (p.data['stock'] as num? ?? 0).toDouble();
+        // تأكد أن اسم الحقل في الداتا بيز هو 'buyPrice' أو 'costPrice' حسب ما سميته
+        // بناءً على كود المشتريات السابق، الاسم كان 'buyPrice'
+        double cost = (p.data['buyPrice'] as num? ?? 0).toDouble();
+
+        if (stock > 0) {
+          totalValue += (stock * cost);
+        }
+      }
+      return totalValue;
+    } catch (e) {
+      print("Error calculating inventory: $e");
+      return 0.0;
+    }
+  }
+
   Future<RecordModel> updateProduct(
     String id,
     Map<String, dynamic> body,

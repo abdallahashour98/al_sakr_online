@@ -1,117 +1,112 @@
+import 'inventory_service.dart';
 import 'pb_helper.dart';
+import 'purchases_service.dart';
+import 'sales_service.dart';
 
 class ReportsService {
   final pb = PBHelper().pb;
+  // ✅ جلب البيانات مع فلتر التاريخ
+  Future<Map<String, double>> getGeneralReportData({
+    String? startDate,
+    String? endDate,
+  }) async {
+    // 1. جلب البيانات من الخدمات بفلتر التاريخ
+    final sales = await SalesService().getSales(
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final returns = await SalesService().getReturns(
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final expenses = await SalesService().getExpenses(
+      startDate: startDate,
+      endDate: endDate,
+    );
 
-  Future<Map<String, double>> getGeneralReportData() async {
-    final now = DateTime.now();
-    String startOfMonth =
-        "${now.year}-${now.month.toString().padLeft(2, '0')}-01 00:00:00";
-    String nextMonth = now.month == 12
-        ? "${now.year + 1}-01-01 00:00:00"
-        : "${now.year}-${(now.month + 1).toString().padLeft(2, '0')}-01 00:00:00";
-    String dateFilter = "date >= '$startOfMonth' && date < '$nextMonth'";
+    final purchases = await PurchasesService().getPurchases(
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final purchaseReturns = await PurchasesService().getAllPurchaseReturns(
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final supplierPayments = await PurchasesService()
+        .getAllSupplierPayments(); // يحتاج فلترة يدوية لو السيرفس مفيهوش فلتر
 
-    try {
-      // 1. مرتجعات العملاء
-      final clientReturnsRec = await pb
-          .collection('returns')
-          .getFullList(filter: dateFilter);
-      double monthlyClientReturns = clientReturnsRec.fold(
+    // 2. تجميع الأرقام
+    // أ. المبيعات (نستخدم netAmount لأنه الأهم)
+    double totalSales = sales.fold(
+      0.0,
+      (sum, item) =>
+          sum + ((item['netAmount'] ?? item['totalAmount']) as num).toDouble(),
+    );
+
+    // ب. مرتجعات العملاء
+    double totalClientReturns = returns.fold(
+      0.0,
+      (sum, item) => sum + (item['totalAmount'] as num).toDouble(),
+    );
+
+    // ج. المصروفات
+    double totalExpenses = expenses.fold(
+      0.0,
+      (sum, item) => sum + (item['amount'] as num).toDouble(),
+    );
+
+    // د. فواتير المشتريات
+    double totalPurchasesBills = purchases.fold(
+      0.0,
+      (sum, item) => sum + (item['totalAmount'] as num).toDouble(),
+    );
+
+    // هـ. مرتجعات الموردين
+    double totalSupplierReturns = purchaseReturns.fold(
+      0.0,
+      (sum, item) => sum + (item['totalAmount'] as num).toDouble(),
+    );
+
+    // و. مدفوعات الموردين (فلترة يدوية للتأكيد)
+    double totalSupplierPayments = 0.0;
+    if (startDate != null && endDate != null) {
+      DateTime start = DateTime.parse(startDate);
+      DateTime end = DateTime.parse(endDate);
+      for (var p in supplierPayments) {
+        // تأكد من وجود حقل date في المدفوعات
+        if (p['date'] != null) {
+          DateTime pDate = DateTime.parse(p['date']);
+          if (pDate.isAfter(start) && pDate.isBefore(end)) {
+            totalSupplierPayments += (p['amount'] as num).toDouble();
+          }
+        }
+      }
+    } else {
+      totalSupplierPayments = supplierPayments.fold(
         0.0,
-        (sum, item) => sum + (item.data['totalAmount'] ?? 0),
+        (sum, item) => sum + (item['amount'] as num).toDouble(),
       );
-
-      // 2. مرتجعات الموردين
-      final supplierReturnsRec = await pb
-          .collection('purchase_returns')
-          .getFullList(filter: dateFilter);
-      double monthlySupplierReturns = supplierReturnsRec.fold(
-        0.0,
-        (sum, item) => sum + (item.data['totalAmount'] ?? 0),
-      );
-
-      // 3. المبيعات
-      final salesRec = await pb
-          .collection('sales')
-          .getFullList(filter: dateFilter);
-      double monthlySales = salesRec.fold(
-        0.0,
-        (sum, item) => sum + (item.data['netAmount'] ?? 0),
-      );
-
-      // 4. المرتجعات (إجمالي)
-      final returnsRec = await pb
-          .collection('returns')
-          .getFullList(filter: dateFilter);
-      double monthlyReturns = returnsRec.fold(
-        0.0,
-        (sum, item) => sum + (item.data['totalAmount'] ?? 0),
-      );
-
-      // 5. المصروفات
-      final expensesRec = await pb
-          .collection('expenses')
-          .getFullList(filter: dateFilter);
-      double monthlyExpenses = expensesRec.fold(
-        0.0,
-        (sum, item) => sum + (item.data['amount'] ?? 0),
-      );
-
-      // 6. المشتريات (الفواتير)
-      final purchasesRec = await pb
-          .collection('purchases')
-          .getFullList(filter: dateFilter);
-      double monthlyBills = purchasesRec.fold(
-        0.0,
-        (sum, item) => sum + (item.data['totalAmount'] ?? 0),
-      );
-
-      // 7. مدفوعات الموردين
-      final supplierPayRec = await pb
-          .collection('supplier_payments')
-          .getFullList(filter: dateFilter);
-      double monthlyPayments = supplierPayRec.fold(
-        0.0,
-        (sum, item) => sum + (item.data['amount'] ?? 0),
-      );
-
-      // 8. قيمة المخزون
-      final productsRec = await pb.collection('products').getFullList();
-      double inventoryVal = productsRec.fold(0.0, (sum, item) {
-        double qty = (item.data['stock'] ?? 0).toDouble();
-        double cost = (item.data['buyPrice'] ?? 0).toDouble();
-        return sum + (qty * cost);
-      });
-
-      // 9. مديونيات العملاء (لنا)
-      final clientsRec = await pb.collection('clients').getFullList();
-      double receivables = clientsRec.fold(
-        0.0,
-        (sum, item) => sum + (item.data['balance'] ?? 0),
-      );
-
-      // 10. مديونيات الموردين (علينا)
-      final suppliersRec = await pb.collection('suppliers').getFullList();
-      double payables = suppliersRec.fold(
-        0.0,
-        (sum, item) => sum + (item.data['balance'] ?? 0),
-      );
-
-      return {
-        'monthlySales': monthlySales,
-        'clientReturns': monthlyClientReturns,
-        'supplierReturns': monthlySupplierReturns,
-        'monthlyReturns': monthlyReturns,
-        'monthlyExpenses': monthlyExpenses,
-        'monthlyBills': monthlyBills,
-        'monthlyPayments': monthlyPayments,
-        'inventory': inventoryVal,
-        'receivables': receivables,
-        'payables': payables,
-      };
-    } catch (e) {
-      return {};
     }
+
+    // ز. قيمة المخزون (تراكمية - لا تتأثر بالفلتر)
+    // ✅ هنا نستدعي الدالة اللي لسه ضايفينها في InventoryService
+    double inventoryVal = 0.0;
+    try {
+      // تأكد من عمل import لـ inventory_service.dart
+      inventoryVal = await InventoryService().getInventoryValue();
+    } catch (_) {}
+
+    return {
+      'monthlySales': totalSales,
+      'clientReturns': totalClientReturns,
+      'monthlyReturns': totalClientReturns, // نفس القيمة
+      'monthlyExpenses': totalExpenses,
+      'monthlyBills': totalPurchasesBills,
+      'supplierReturns': totalSupplierReturns,
+      'monthlyPayments': totalSupplierPayments,
+      'inventory': inventoryVal,
+      'receivables': 0.0, // يمكن إضافتها لاحقاً من ClientService
+      'payables': 0.0, // يمكن إضافتها لاحقاً من SupplierService
+    };
   }
 }

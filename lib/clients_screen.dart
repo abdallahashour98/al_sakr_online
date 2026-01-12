@@ -146,7 +146,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
 
     return Scaffold(
       backgroundColor: bgColor,
-      appBar: AppBar(title: const Text('إدارة العملاء')),
+      appBar: AppBar(title: const Text('إدارة العملاء'), centerTitle: true),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: PBHelper().getCollectionStream('clients', sort: 'name'),
         builder: (context, snapshot) {
@@ -737,7 +737,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
 
                   // طريقة الدفع
                   DropdownButtonFormField<String>(
-                    value: paymentMethod,
+                    initialValue: paymentMethod,
                     dropdownColor: isDark
                         ? const Color(0xFF333333)
                         : Colors.white,

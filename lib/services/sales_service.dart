@@ -175,10 +175,35 @@ class SalesService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getSales() async {
+  // دالة لتعديل رقم الفاتورة اليدوي فقط
+  Future<void> updateSaleReference(String saleId, String newRefNumber) async {
+    try {
+      await pb
+          .collection('sales')
+          .update(
+            saleId,
+            body: {
+              'referenceNumber': newRefNumber, // اسم الحقل في الداتا بيز
+            },
+          );
+      print("✅ تم تعديل رقم الفاتورة بنجاح");
+    } catch (e) {
+      throw Exception("فشل تعديل رقم الفاتورة: $e");
+    }
+  }
+
+  // ✅ تعديل: دالة جلب المبيعات لتقبل فلتر التاريخ
+  Future<List<Map<String, dynamic>>> getSales({
+    String? startDate,
+    String? endDate,
+  }) async {
+    String filter = '';
+    if (startDate != null && endDate != null) {
+      filter = 'date >= "$startDate" && date <= "$endDate"';
+    }
     final records = await pb
         .collection('sales')
-        .getFullList(sort: '-date', expand: 'client');
+        .getFullList(sort: '-date', expand: 'client', filter: filter);
     return records.map(PBHelper.recordToMap).toList();
   }
 
@@ -281,10 +306,34 @@ class SalesService {
     await batch.send();
   }
 
-  Future<List<Map<String, dynamic>>> getReturns() async {
+  // ✅ تعديل: دالة جلب المرتجعات لتقبل فلتر التاريخ
+  Future<List<Map<String, dynamic>>> getReturns({
+    String? startDate,
+    String? endDate,
+  }) async {
+    String filter = '';
+    if (startDate != null && endDate != null) {
+      filter = 'date >= "$startDate" && date <= "$endDate"';
+    }
     final records = await pb
         .collection('returns')
-        .getFullList(sort: '-date', expand: 'client');
+        .getFullList(sort: '-date', expand: 'client', filter: filter);
+    return records.map(PBHelper.recordToMap).toList();
+  }
+
+  // ✅ دالة جلب المصروفات مع فلتر التاريخ (لحساب صافي الحركة)
+  Future<List<Map<String, dynamic>>> getExpenses({
+    String? startDate,
+    String? endDate,
+  }) async {
+    String filter = '';
+    if (startDate != null && endDate != null) {
+      filter = 'date >= "$startDate" && date <= "$endDate"';
+    }
+
+    final records = await pb
+        .collection('expenses')
+        .getFullList(sort: '-date', filter: filter);
     return records.map(PBHelper.recordToMap).toList();
   }
 

@@ -5,6 +5,18 @@ import 'package:flutter/material.dart';
 import 'product_dialog.dart';
 import 'client_dialog.dart';
 
+/// ============================================================
+/// 🛒 شاشة المبيعات (Sales Screen) - نقطة البيع (POS)
+/// ============================================================
+/// الغرض:
+/// تتيح للمستخدم (/المسؤول) إنشاء فواتير مبيعات جديدة.
+///
+/// الميزات الأساسية:
+/// 1. البحث عن العملاء وإضافتهم.
+/// 2. البحث عن المنتجات (بالاسم أو الكود) وإضافتها للسلة.
+/// 3. حساب العمليات الحسابية (الضرائب، الخصم، الإجمالي) تلقائياً.
+/// 4. التعامل مع الصلاحيات (User Permissions) لإخفاء/إظهار الميزات.
+/// 5. تصميم متجاوب (Responsive) يعمل على الموبايل والكمبيوتر.
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
 
@@ -13,40 +25,61 @@ class SalesScreen extends StatefulWidget {
 }
 
 class _SalesScreenState extends State<SalesScreen> {
-  // --- المتغيرات ---
+  // ============================================================
+  // 1️⃣ إدارة الحالة والمتغيرات (State & Variables)
+  // ============================================================
+
+  /// سلة المشتريات: قائمة تحتوي على المنتجات التي تم اختيارها للفاتورة الحالية
   final List<Map<String, dynamic>> _invoiceItems = [];
+
+  /// العميل المختار حالياً للفاتورة
   Map<String, dynamic>? _selectedClient;
+
+  /// المنتج الذي يتم تجهيزه للإضافة (Temp selection)
   Map<String, dynamic>? _selectedProduct;
 
-  // Controllers
+  // --- أدوات التحكم في النصوص (Text Controllers) ---
   final _clientSearchController = TextEditingController();
   final _productSearchController = TextEditingController();
-  final _qtyController = TextEditingController(text: '1');
+  final _qtyController = TextEditingController(
+    text: '1',
+  ); // القيمة الافتراضية 1
   final _priceController = TextEditingController();
-  final _discountController = TextEditingController(text: '0');
-  final _refController = TextEditingController();
+  final _discountController = TextEditingController(
+    text: '0',
+  ); // خصم إضافي على الفاتورة
+  final _refController =
+      TextEditingController(); // رقم الفاتورة اليدوي أو المرجعي
 
-  bool _isTaxEnabled = false;
-  bool _isWhtEnabled = false;
-  bool _isCashPayment = true;
-  DateTime _invoiceDate = DateTime.now();
+  // --- إعدادات الفاتورة (Flags) ---
+  bool _isTaxEnabled = false; // هل يتم تطبيق ضريبة القيمة المضافة 14%؟
+  bool _isWhtEnabled = false; // هل يتم تطبيق ضريبة الخصم من المنبع 1%؟
+  bool _isCashPayment = true; // نوع الفاتورة: كاش (true) أو آجل (false)
+  DateTime _invoiceDate = DateTime.now(); // تاريخ الفاتورة
 
+  // --- الصلاحيات (Permissions) ---
+  // يتم تحميل هذه القيم من قاعدة البيانات عند فتح الشاشة
   bool _canAddOrder = false;
   bool _canAddClient = false;
   bool _canAddProduct = false;
 
+  /// معرف المدير العام (Super Admin) - يمتلك كل الصلاحيات دائماً
   final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
+    // عند بدء الشاشة، نبدأ فوراً في جلب صلاحيات المستخدم
     _loadPermissions();
   }
 
+  /// 🔐 دالة تحميل الصلاحيات (Authorization Logic)
+  /// تتحقق من هوية المستخدم الحالي وتفعل الأزرار بناءً على صلاحياته في الـ Database
   Future<void> _loadPermissions() async {
     final myId = PBHelper().pb.authStore.record?.id;
     if (myId == null) return;
 
+    // 1. لو المستخدم هو الـ Super Admin -> افتح كل الصلاحيات فوراً
     if (myId == _superAdminId) {
       if (mounted) {
         setState(() {
@@ -58,6 +91,7 @@ class _SalesScreenState extends State<SalesScreen> {
       return;
     }
 
+    // 2. لو مستخدم عادي -> اسأل قاعدة البيانات (Users Collection)
     try {
       final userRecord = await PBHelper().pb.collection('users').getOne(myId);
       if (mounted) {
@@ -72,21 +106,43 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
+  // ============================================================
+  // 2️⃣ "الآلة الحاسبة" (Getters for Calculations)
+  // ============================================================
+  // هذه الدوال تحسب الأرقام ديناميكياً بناءً على محتوى السلة والخيارات المفعلة
+
+  /// مجموع أسعار المنتجات قبل أي خصم أو ضريبة
   double get _subTotal =>
       _invoiceItems.fold(0.0, (sum, item) => sum + (item['total'] as double));
+
+  /// قيمة الخصم المكتوبة في الحقل
   double get _discount => double.tryParse(_discountController.text) ?? 0.0;
+
+  /// المبلغ الخاضع للضريبة (الإجمالي الفرعي - الخصم)
   double get _taxableAmount => _subTotal - _discount;
+
+  /// قيمة الضريبة المضافة (14%) إذا كانت مفعلة
   double get _taxAmount => _isTaxEnabled ? _taxableAmount * 0.14 : 0.0;
+
+  /// قيمة ضريبة الخصم والتحصيل (1%) إذا كانت مفعلة
   double get _whtAmount => _isWhtEnabled ? _taxableAmount * 0.01 : 0.0;
+
+  /// صافي الفاتورة النهائي المطلوب دفعه
   double get _grandTotal => _taxableAmount + _taxAmount - _whtAmount;
 
+  // ============================================================
+  // 3️⃣ الحوارات والنوافذ المنبثقة (Dialogs)
+  // ============================================================
+
+  /// فتح نافذة إضافة عميل جديد
   Future<void> _openAddClientDialog() async {
-    if (!_canAddClient) return;
+    if (!_canAddClient) return; // حماية إضافية للصلاحية
     final result = await showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => const ClientDialog(),
     );
+    // إذا تم إضافة عميل بنجاح، يتم اختياره تلقائياً
     if (result != null && result is Map) {
       setState(() {
         _selectedClient = result as Map<String, dynamic>;
@@ -95,6 +151,7 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
+  /// فتح نافذة إضافة منتج جديد
   Future<void> _openAddProductDialog() async {
     if (!_canAddProduct) return;
     final result = await showDialog(
@@ -111,7 +168,10 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
-  // ✅ دالة البحث المحسنة (زي المشتريات بالظبط)
+  /// 🔎 دالة البحث الشاملة (Universal Search Dialog)
+  /// تستخدم للبحث عن العملاء (isClient = true) أو المنتجات (isClient = false)
+  /// - تدعم البحث بالاسم وبالكود (للمنتجات).
+  /// - تعرض النتائج بشكل فوري (Real-time Stream).
   void _showSearchDialog({required bool isClient}) {
     showDialog(
       context: context,
@@ -132,6 +192,7 @@ class _SalesScreenState extends State<SalesScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
+                    // عنوان البحث
                     Text(
                       isClient ? 'بحث عن عميل' : 'اختر صنفاً',
                       style: const TextStyle(
@@ -140,6 +201,8 @@ class _SalesScreenState extends State<SalesScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+
+                    // حقل كتابة البحث
                     TextField(
                       autofocus: true,
                       onChanged: (val) => setStateSB(() => query = val),
@@ -162,6 +225,8 @@ class _SalesScreenState extends State<SalesScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+
+                    // عرض النتائج باستخدام Stream
                     Expanded(
                       child: StreamBuilder<List<Map<String, dynamic>>>(
                         stream: PBHelper().getCollectionStream(
@@ -175,6 +240,8 @@ class _SalesScreenState extends State<SalesScreen> {
                             );
                           }
                           final allItems = snapshot.data!;
+
+                          // عملية الفلترة (Client-side filtering)
                           final filteredList = allItems.where((item) {
                             final q = query.toLowerCase();
                             final name = (item['name'] ?? '')
@@ -183,6 +250,7 @@ class _SalesScreenState extends State<SalesScreen> {
                             if (isClient) {
                               return name.contains(q);
                             } else {
+                              // في المنتجات نبحث بالاسم أو الباركود
                               final code = (item['code'] ?? '')
                                   .toString()
                                   .toLowerCase();
@@ -217,6 +285,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
                               return GestureDetector(
                                 onTap: () {
+                                  // عند اختيار عنصر، نحدث المتغيرات ونغلق البحث
                                   setState(() {
                                     if (isClient) {
                                       _selectedClient = item;
@@ -232,6 +301,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                   });
                                   Navigator.pop(ctx);
                                 },
+                                // تصميم كارت العنصر في البحث
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 10,
@@ -251,10 +321,10 @@ class _SalesScreenState extends State<SalesScreen> {
                                   ),
                                   child: Row(
                                     children: [
-                                      // 1. الصورة
+                                      // صورة العنصر
                                       Container(
-                                        width: 50,
-                                        height: 50,
+                                        width: 30,
+                                        height: 30,
                                         decoration: BoxDecoration(
                                           borderRadius: BorderRadius.circular(
                                             8,
@@ -269,12 +339,11 @@ class _SalesScreenState extends State<SalesScreen> {
                                               )
                                             : _buildProductImage(
                                                 item['imagePath'],
-                                                size: 50,
+                                                size: 25,
                                               ),
                                       ),
                                       const SizedBox(width: 12),
-
-                                      // 2. التفاصيل
+                                      // تفاصيل الاسم والسعر/الرقم
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment:
@@ -282,7 +351,6 @@ class _SalesScreenState extends State<SalesScreen> {
                                           mainAxisAlignment:
                                               MainAxisAlignment.center,
                                           children: [
-                                            // الاسم المتحرك
                                             SizedBox(
                                               height: 20,
                                               child: ScrollingText(
@@ -297,75 +365,9 @@ class _SalesScreenState extends State<SalesScreen> {
                                             if (!isClient)
                                               Row(
                                                 children: [
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 8,
-                                                          vertical: 2,
-                                                        ),
-                                                    decoration: BoxDecoration(
-                                                      color:
-                                                          (item['stock'] ?? 0) >
-                                                              0
-                                                          ? Colors.green
-                                                                .withOpacity(
-                                                                  0.1,
-                                                                )
-                                                          : Colors.red
-                                                                .withOpacity(
-                                                                  0.1,
-                                                                ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            6,
-                                                          ),
-                                                      border: Border.all(
-                                                        color:
-                                                            (item['stock'] ??
-                                                                    0) >
-                                                                0
-                                                            ? Colors.green
-                                                                  .withOpacity(
-                                                                    0.3,
-                                                                  )
-                                                            : Colors.red
-                                                                  .withOpacity(
-                                                                    0.3,
-                                                                  ),
-                                                      ),
-                                                    ),
-                                                    child: Row(
-                                                      children: [
-                                                        Icon(
-                                                          Icons
-                                                              .inventory_2_outlined,
-                                                          size: 12,
-                                                          color:
-                                                              (item['stock'] ??
-                                                                      0) >
-                                                                  0
-                                                              ? Colors.green
-                                                              : Colors.red,
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 4,
-                                                        ),
-                                                        Text(
-                                                          "${item['stock']}",
-                                                          style: TextStyle(
-                                                            fontSize: 12,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            color:
-                                                                (item['stock'] ??
-                                                                        0) >
-                                                                    0
-                                                                ? Colors.green
-                                                                : Colors.red,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
+                                                  // حالة المخزون (أخضر=متاح، أحمر=نفد)
+                                                  _buildStockIndicator(
+                                                    item['stock'],
                                                   ),
                                                   const SizedBox(width: 12),
                                                   Text(
@@ -399,6 +401,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         },
                       ),
                     ),
+                    // زر الإلغاء
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
@@ -420,15 +423,63 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
+  // Helper widget لعرض حالة المخزون داخل البحث
+  Widget _buildStockIndicator(dynamic stockVal) {
+    int stock = (stockVal ?? 0);
+    bool inStock = stock > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: inStock
+            ? Colors.green.withOpacity(0.1)
+            : Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: inStock
+              ? Colors.green.withOpacity(0.3)
+              : Colors.red.withOpacity(0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 12,
+            color: inStock ? Colors.green : Colors.red,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            "$stock",
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: inStock ? Colors.green : Colors.red,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 4️⃣ منطق الفاتورة (Invoice Logic)
+  // ============================================================
+
+  /// إضافة صنف للسلة (Invoice Items)
+  /// تقوم هذه الدالة بالتحقق من المدخلات، وتحديث الكمية إذا كان الصنف موجوداً مسبقاً
   void _addItemToInvoice() {
+    // 1. التحقق من صحة المدخلات
     if (_selectedProduct == null ||
         _qtyController.text.isEmpty ||
-        _priceController.text.isEmpty)
+        _priceController.text.isEmpty) {
       return;
+    }
+
     int qty = int.tryParse(_qtyController.text) ?? 1;
     double price = double.tryParse(_priceController.text) ?? 0.0;
     if (qty <= 0) return;
 
+    // TODO: تفعيل التحقق من المخزون عند الحاجة
     // int currentStock = (_selectedProduct!['stock'] as num).toInt();
     // if (qty > currentStock) {
     //   _showError('الكمية غير متوفرة! المتاح: $currentStock');
@@ -436,18 +487,18 @@ class _SalesScreenState extends State<SalesScreen> {
     // }
 
     setState(() {
+      // 2. البحث: هل المنتج ده موجود في الليستة قبل كده؟
       final existingIndex = _invoiceItems.indexWhere(
         (item) => item['productId'] == _selectedProduct!['id'],
       );
+
       if (existingIndex >= 0) {
+        // لو موجود -> زود الكمية على القديم
         int newQty = _invoiceItems[existingIndex]['quantity'] + qty;
-        // if (newQty > currentStock) {
-        //   _showError('تخطي الرصيد المتاح');
-        //   return;
-        // }
         _invoiceItems[existingIndex]['quantity'] = newQty;
         _invoiceItems[existingIndex]['total'] = newQty * price;
       } else {
+        // لو جديد -> ضيف سطر جديد
         _invoiceItems.add({
           'productId': _selectedProduct!['id'],
           'name': _selectedProduct!['name'],
@@ -457,6 +508,8 @@ class _SalesScreenState extends State<SalesScreen> {
           'imagePath': _selectedProduct!['imagePath'],
         });
       }
+
+      // 3. إعادة تهيئة حقول الإدخال للمنتج القادم
       _selectedProduct = null;
       _productSearchController.clear();
       _priceController.clear();
@@ -464,20 +517,25 @@ class _SalesScreenState extends State<SalesScreen> {
     });
   }
 
+  /// حذف صنف من القائمة
   void _removeItem(int index) {
     setState(() => _invoiceItems.removeAt(index));
   }
 
+  /// 💾 حفظ الفاتورة في قاعدة البيانات
   Future<void> _saveInvoice() async {
+    // 1. التحقق من الصلاحيات والبيانات الأساسية
     if (!_canAddOrder) {
-      _showError('ليس لديك صلاحية');
+      _showError('ليس لديك صلاحية لإضافة فواتير');
       return;
     }
     if (_invoiceItems.isEmpty || _selectedClient == null) {
-      _showError('البيانات ناقصة');
+      _showError('البيانات ناقصة (تأكد من اختيار عميل وإضافة منتجات)');
       return;
     }
+
     try {
+      // 2. استدعاء السيرفيس للحفظ
       await SalesService().createSale(
         _selectedClient!['id'],
         _selectedClient!['name'],
@@ -489,20 +547,23 @@ class _SalesScreenState extends State<SalesScreen> {
         isCash: _isCashPayment,
         whtAmount: _whtAmount,
       );
+
+      // 3. نجاح الحفظ -> إظهار رسالة وتصفير الشاشة
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('تم الحفظ ✅'),
+            content: Text('تم حفظ الفاتورة بنجاح ✅'),
             backgroundColor: Colors.green,
           ),
         );
         _resetScreen();
       }
     } catch (e) {
-      _showError('خطأ: $e');
+      _showError('حدث خطأ أثناء الحفظ: $e');
     }
   }
 
+  /// إعادة تعيين الشاشة لوضعها الافتراضي (تفريغ الحقول)
   void _resetScreen() {
     setState(() {
       _invoiceItems.clear();
@@ -524,7 +585,11 @@ class _SalesScreenState extends State<SalesScreen> {
     ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
-  Widget _buildProductImage(String? imagePath, {double size = 45}) {
+  // ============================================================
+  // 5️⃣ بناء الواجهة (UI Build Method)
+  // ============================================================
+
+  Widget _buildProductImage(String? imagePath, {double size = 25}) {
     if (imagePath != null && imagePath.isNotEmpty) {
       if (imagePath.startsWith('http')) {
         return ClipRRect(
@@ -565,15 +630,16 @@ class _SalesScreenState extends State<SalesScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accentColor = isDark ? Colors.blue[300]! : Colors.blue[800]!;
 
-    // ✅ استخدام MediaQuery بدلاً من LayoutBuilder
+    // ✅ Responsive Logic: تحديد عرض الشاشة لتغيير التخطيط (Layout)
     bool isWide = MediaQuery.of(context).size.width > 600;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('فاتورة مبيعات')),
+      appBar: AppBar(title: const Text('فاتورة مبيعات'), centerTitle: true),
+
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
-            // 1. الجزء العلوي (كارت البيانات)
+            // 🟥 الجزء الأول: كارت البيانات الأساسية (عميل، تاريخ، رقم فاتورة)
             SliverToBoxAdapter(
               child: Card(
                 margin: const EdgeInsets.all(10),
@@ -608,10 +674,9 @@ class _SalesScreenState extends State<SalesScreen> {
                       ),
                       const SizedBox(height: 10),
 
-                      // ✅ الصف الثاني: (التاريخ + رقم الفاتورة اليدوي)
+                      // الصف الثاني: التاريخ ورقم الفاتورة اليدوي
                       Row(
                         children: [
-                          // 1. التاريخ
                           Expanded(
                             child: InkWell(
                               onTap: () async {
@@ -645,13 +710,11 @@ class _SalesScreenState extends State<SalesScreen> {
                             ),
                           ),
                           const SizedBox(width: 10),
-
-                          // 2. ✅ رقم الفاتورة اليدوي (الإضافة الجديدة)
                           Expanded(
                             child: TextField(
                               controller: _refController,
                               decoration: const InputDecoration(
-                                labelText: 'رقم الفاتورة (يدوي)',
+                                labelText: 'رقم الفاتورة ',
                                 prefixIcon: Icon(Icons.receipt_long, size: 18),
                                 border: OutlineInputBorder(),
                                 isDense: true,
@@ -666,12 +729,12 @@ class _SalesScreenState extends State<SalesScreen> {
                       ),
 
                       const SizedBox(height: 10),
-                      const Divider(), // فاصل جمالي
+                      const Divider(), // فاصل
                       const SizedBox(height: 5),
 
-                      // الصف الثالث: إضافة المنتجات (كما هو بالكود القديم)
+                      // الصف الثالث: منطقة إضافة المنتجات (تختلف حسب حجم الشاشة)
                       if (!isWide)
-                        // موبايل
+                        // تصميم الموبايل (عناصر فوق بعض)
                         Column(
                           children: [
                             TextField(
@@ -755,7 +818,7 @@ class _SalesScreenState extends State<SalesScreen> {
                           ],
                         )
                       else
-                        // كمبيوتر
+                        // تصميم الكمبيوتر (عناصر بجانب بعض)
                         Row(
                           children: [
                             Expanded(
@@ -827,7 +890,8 @@ class _SalesScreenState extends State<SalesScreen> {
                 ),
               ),
             ),
-            // 2. الجزء الأوسط (القائمة)
+
+            // 🟥 الجزء الثاني: قائمة العناصر المضافة (السلة)
             SliverToBoxAdapter(
               child: _invoiceItems.isEmpty
                   ? const SizedBox(
@@ -885,7 +949,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     ),
             ),
 
-            // 3. الجزء السفلي (لوحة التحكم الشيك)
+            // 🟥 الجزء الثالث: لوحة التحكم السفلية (الحسابات والدفع)
             SliverFillRemaining(
               hasScrollBody: false,
               child: Column(
@@ -910,7 +974,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // لوحة التحكم (الذكية)
+                        // --- أزرار التحكم في الضرائب والدفع ---
                         if (!isWide)
                           // موبايل (عمودي)
                           Column(
@@ -943,23 +1007,20 @@ class _SalesScreenState extends State<SalesScreen> {
                             ],
                           )
                         else
-                          // كمبيوتر (أفقي موزون)
+                          // كمبيوتر (أفقي وموزع)
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              // كاش (2)
                               Expanded(
                                 flex: 2,
                                 child: _buildSegmentedPaymentToggle(isDark),
                               ),
                               const SizedBox(width: 15),
-                              // خصم (2)
                               Expanded(
                                 flex: 2,
                                 child: _buildDiscountField(isDark),
                               ),
                               const SizedBox(width: 15),
-                              // ضرائب (3)
                               Expanded(
                                 flex: 3,
                                 child: Row(
@@ -994,6 +1055,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         const SizedBox(height: 20),
                         const Divider(),
 
+                        // --- ملخص الحسابات (أرقام فقط) ---
                         _buildSummaryLine("المجموع الفرعي", _subTotal),
                         if (_isTaxEnabled)
                           _buildSummaryLine(
@@ -1015,6 +1077,7 @@ class _SalesScreenState extends State<SalesScreen> {
                           ),
                         const SizedBox(height: 20),
 
+                        // --- زر الحفظ النهائي ---
                         GestureDetector(
                           onTap: _saveInvoice,
                           child: Container(
@@ -1080,8 +1143,11 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  // --- دوال التصميم (Control Panel) ---
+  // ============================================================
+  // 6️⃣ أدوات بناء الواجهة (Widget Builders)
+  // ============================================================
 
+  /// إنشاء زر التبديل بين الكاش والآجل
   Widget _buildSegmentedPaymentToggle(bool isDark) {
     return Container(
       height: 50,
@@ -1149,6 +1215,7 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
+  /// حقل إدخال الخصم (Discount Field)
   Widget _buildDiscountField(bool isDark) {
     return SizedBox(
       height: 50,
@@ -1180,6 +1247,7 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
+  /// زر تبديل الضرائب (Tax Toggle Button)
   Widget _buildTaxToggle(
     String label,
     bool value,
@@ -1235,7 +1303,8 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 }
 
-// --- كلاس النص المتحرك (مهم جداً) ---
+// --- كلاس النص المتحرك (مهم جداً للنصوص الطويلة) ---
+/// ويدجت لعرض نص يتحرك تلقائياً (Marquee) إذا كان أطول من المساحة المتاحة
 class ScrollingText extends StatefulWidget {
   final String text;
   final TextStyle? style;

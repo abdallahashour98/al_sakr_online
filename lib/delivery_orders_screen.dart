@@ -5,6 +5,9 @@ import 'PdfService.dart';
 import 'services/inventory_service.dart';
 import 'product_search_dialog.dart';
 
+// ✅ Enum لنوع الفلتر
+enum OrderFilter { monthly, yearly }
+
 class DeliveryOrdersScreen extends StatefulWidget {
   const DeliveryOrdersScreen({super.key});
 
@@ -13,6 +16,10 @@ class DeliveryOrdersScreen extends StatefulWidget {
 }
 
 class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
+  // ✅ متغيرات الفلتر
+  OrderFilter _filterType = OrderFilter.monthly;
+  DateTime _selectedDate = DateTime.now();
+
   List<Map<String, dynamic>> _allOrdersFlat = [];
   Map<String, List<Map<String, dynamic>>> _groupedOrders = {};
 
@@ -30,13 +37,11 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
   void initState() {
     super.initState();
     _loadPermissions();
-    _loadData(); // تحميل أولي
+    _loadData();
 
     // ✅ الاشتراك في التحديثات اللحظية (Real-time)
-    // عند حدوث أي تغيير (إضافة/تعديل/حذف) في جدول الأذونات، نعيد تحميل البيانات
     InventoryService().pb.collection('delivery_orders').subscribe('*', (e) {
       if (mounted) {
-        // نمرر false عشان الشاشة متعملش وميض (Loading) مزعج، بل تحدث البيانات في الخلفية
         _loadData(showLoading: false);
       }
     });
@@ -44,7 +49,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
 
   @override
   void dispose() {
-    // ✅ إلغاء الاشتراك عند الخروج لتوفير الموارد
     InventoryService().pb.collection('delivery_orders').unsubscribe('*');
     _searchController.dispose();
     super.dispose();
@@ -78,12 +82,58 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     }
   }
 
-  // ✅ تعديل الدالة لتقبل showLoading للتحكم في ظهور التحميل
+  // ✅ تغيير التاريخ
+  void _changeDate(int offset) {
+    setState(() {
+      if (_filterType == OrderFilter.monthly) {
+        _selectedDate = DateTime(
+          _selectedDate.year,
+          _selectedDate.month + offset,
+          1,
+        );
+      } else {
+        _selectedDate = DateTime(_selectedDate.year + offset, 1, 1);
+      }
+      _isLoading = true;
+    });
+    _loadData();
+  }
+
+  // ✅ تحميل البيانات مع الفلتر
   Future<void> _loadData({bool showLoading = true}) async {
     if (showLoading) setState(() => _isLoading = true);
 
+    // 1. تحديد بداية ونهاية الفترة
+    DateTime startDate, endDate;
+    if (_filterType == OrderFilter.monthly) {
+      startDate = DateTime(_selectedDate.year, _selectedDate.month, 1);
+      endDate = DateTime(
+        _selectedDate.year,
+        _selectedDate.month + 1,
+        0,
+        23,
+        59,
+        59,
+      );
+    } else {
+      startDate = DateTime(_selectedDate.year, 1, 1);
+      endDate = DateTime(_selectedDate.year, 12, 31, 23, 59, 59);
+    }
+
+    // 2. جلب الكل ثم الفلترة محلياً (لضمان العمل دون تعديل السيرفس حالياً)
     final rawOrders = await SalesService().getAllDeliveryOrders();
-    // نجلب العملاء والمنتجات فقط إذا كانت القوائم فارغة (تحسين للأداء)
+
+    // فلترة القائمة حسب التاريخ المختار
+    final filteredOrders = rawOrders.where((order) {
+      if (order['date'] == null) return false;
+      DateTime orderDate = DateTime.parse(order['date']);
+      return orderDate.isAfter(
+            startDate.subtract(const Duration(seconds: 1)),
+          ) &&
+          orderDate.isBefore(endDate.add(const Duration(seconds: 1)));
+    }).toList();
+
+    // تحميل البيانات المساعدة (عملاء ومنتجات) لمرة واحدة
     if (_clients.isEmpty) {
       final clients = await SalesService().getClients();
       final products = await InventoryService().getProducts();
@@ -98,7 +148,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     List<Map<String, dynamic>> enrichedOrders = [];
 
     // معالجة البيانات (تجميع أرقام أوامر التوريد)
-    for (var order in rawOrders) {
+    for (var order in filteredOrders) {
       final items = await SalesService().getDeliveryOrderItems(order['id']);
       Set<String> allNumbers = {};
 
@@ -119,6 +169,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
       enrichedOrders.add(newOrder);
     }
 
+    // ترتيب تنازلي حسب تاريخ الإنشاء
     enrichedOrders.sort((a, b) {
       String dateA = a['created'] ?? '';
       String dateB = b['created'] ?? '';
@@ -177,6 +228,26 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     String year = date.year.toString();
     return "$day$month$year";
   }
+
+  String _getMonthName(int month) {
+    const months = [
+      "يناير",
+      "فبراير",
+      "مارس",
+      "أبريل",
+      "مايو",
+      "يونيو",
+      "يوليو",
+      "أغسطس",
+      "سبتمبر",
+      "أكتوبر",
+      "نوفمبر",
+      "ديسمبر",
+    ];
+    return months[month - 1];
+  }
+
+  // --- دوال الديالوج والعمليات (كما هي تماماً) ---
 
   void _showOrderDialog({
     Map<String, dynamic>? existingOrder,
@@ -264,7 +335,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                 content: SizedBox(
                   width: double.maxFinite,
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 500),
+                    constraints: const BoxConstraints(maxWidth: 2000),
                     child: SingleChildScrollView(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -403,7 +474,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
             child: Container(
               padding: const EdgeInsets.all(20),
               constraints: BoxConstraints(
-                maxWidth: 800,
+                maxWidth: 2000,
                 maxHeight: MediaQuery.of(context).size.height * 0.9,
               ),
               child: Column(
@@ -630,7 +701,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                         child: const Text('إلغاء'),
                       ),
                       const SizedBox(width: 10),
-                      // هذا الكود يوضع مكان زر الحفظ القديم
                       ElevatedButton.icon(
                         icon: Icon(isEditing ? Icons.edit : Icons.save),
                         label: Text(isEditing ? 'تعديل وحفظ' : 'حفظ جديد'),
@@ -639,7 +709,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                           foregroundColor: Colors.white,
                         ),
                         onPressed: () async {
-                          // دالة الحفظ الفعلية
                           Future<void> submitOrder() async {
                             if (selectedClientId != null &&
                                 supplyOrderNumber.text.isNotEmpty &&
@@ -687,7 +756,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                             }
                           }
 
-                          // ✅ التحقق من عدد العناصر قبل الحفظ
                           if (tempItems.length > 7) {
                             showDialog(
                               context: context,
@@ -703,8 +771,8 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                                   ),
                                   ElevatedButton(
                                     onPressed: () {
-                                      Navigator.pop(alertCtx); // إغلاق التحذير
-                                      submitOrder(); // تنفيذ الحفظ
+                                      Navigator.pop(alertCtx);
+                                      submitOrder();
                                     },
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.orange,
@@ -718,7 +786,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                               ),
                             );
                           } else {
-                            // لو العدد تمام، احفظ علطول
                             submitOrder();
                           }
                         },
@@ -760,7 +827,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
             onPressed: () async {
               await SalesService().deleteDeliveryOrder(id);
               Navigator.pop(ctx);
-              // _loadData(); // ❌ لا حاجة له
             },
             child: const Text("حذف", style: TextStyle(color: Colors.red)),
           ),
@@ -779,7 +845,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
 
     if (currentStatus) {
       await SalesService().toggleOrderLock(id, false);
-      // _loadData(); // ❌ لا حاجة له
     } else {
       showDialog(
         context: context,
@@ -791,7 +856,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
               onPressed: () async {
                 Navigator.pop(ctx);
                 await SalesService().toggleOrderLock(id, true);
-                // _loadData(); // ❌ لا حاجة له
               },
               child: const Text("لا (قفل فقط)"),
             ),
@@ -814,7 +878,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                     true,
                     imagePath: image.path,
                   );
-                  // _loadData(); // ❌ لا حاجة له
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('تم رفع الصورة وقفل الإذن ✅'),
@@ -869,7 +932,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                 );
                 if (image != null) {
                   await SalesService().updateOrderImage(orderId, image.path);
-                  // _loadData(); // ❌ لا حاجة له
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('تم تغيير الصورة بنجاح ✅'),
@@ -898,7 +960,6 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                         onPressed: () async {
                           await SalesService().updateOrderImage(orderId, null);
                           Navigator.pop(alertCtx);
-                          // _loadData(); // ❌ لا حاجة له
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('تم حذف الصورة 🗑️'),
@@ -925,22 +986,104 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
   @override
   Widget build(BuildContext context) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
+    String filterTitle = _filterType == OrderFilter.monthly
+        ? "${_getMonthName(_selectedDate.month)} ${_selectedDate.year}"
+        : "${_selectedDate.year}";
 
     return Scaffold(
-      appBar: AppBar(title: const Text('أذونات التسليم')),
+      appBar: AppBar(
+        title: const Text('أذونات التسليم'),
+        centerTitle: true,
+        actions: [
+          // ✅ زر اختيار الفلتر
+          PopupMenuButton<OrderFilter>(
+            icon: const Icon(Icons.filter_alt_outlined),
+            onSelected: (OrderFilter result) {
+              setState(() {
+                _filterType = result;
+                _selectedDate = DateTime.now();
+                _isLoading = true;
+              });
+              _loadData();
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: OrderFilter.monthly,
+                child: Text('عرض شهري'),
+              ),
+              const PopupMenuItem(
+                value: OrderFilter.yearly,
+                child: Text('عرض سنوي'),
+              ),
+            ],
+          ),
+        ],
+        // ✅ شريط التنقل (الأسهم)
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(60),
+          child: Container(
+            color: isDark ? const Color(0xFF2C2C2C) : Colors.blue[50],
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  onPressed: () => _changeDate(-1),
+                  icon: const Icon(Icons.arrow_back_ios, size: 20),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.black26 : Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _filterType == OrderFilter.monthly
+                            ? Icons.calendar_month
+                            : Icons.calendar_today,
+                        size: 16,
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        filterTitle,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => _changeDate(1),
+                  icon: const Icon(Icons.arrow_forward_ios, size: 20),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 900),
+                constraints: const BoxConstraints(maxWidth: 2000),
                 child: Column(
                   children: [
+                    // شريط البحث
                     Padding(
                       padding: const EdgeInsets.all(12.0),
                       child: TextField(
                         controller: _searchController,
                         decoration: InputDecoration(
-                          labelText: 'بحث...',
+                          labelText: 'بحث (اسم العميل / رقم الإذن)...',
                           prefixIcon: const Icon(Icons.search),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(15),
@@ -959,7 +1102,9 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
                     ),
                     Expanded(
                       child: _groupedOrders.isEmpty
-                          ? const Center(child: Text("لا توجد نتائج"))
+                          ? const Center(
+                              child: Text("لا توجد أذونات في هذه الفترة"),
+                            )
                           : ListView.builder(
                               padding: const EdgeInsets.only(
                                 left: 10,
