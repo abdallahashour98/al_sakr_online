@@ -29,30 +29,40 @@ class PBHelper {
   }) async {
     final prefs = await SharedPreferences.getInstance();
 
-    // 1. إعداد مخزن المصادقة (للحفاظ على تسجيل الدخول)
+    // 1. إعداد مخزن المصادقة
     final store = AsyncAuthStore(
       save: (String data) async => await prefs.setString('pb_auth', data),
       initial: prefs.getString('pb_auth'),
     );
 
-    // 2. تهيئة PocketBase مع الرابط من constants.dart
-    // نقوم بتحديث الـ instance الموجود ليعمل مع الـ AuthStore المسترجع
+    // 2. تهيئة PocketBase
     PBHelper().pb = PocketBase(AppConfig.baseUrl, authStore: store);
-    print("✅ Connected to PocketBase: ${AppConfig.baseUrl}");
 
     // 3. إعدادات الإشعارات (Notifications)
-    // ✅ التعديل الصحيح:
-    // ✅ التعديل الصحيح:
-    // ✅ الصحيح:
+
+    // أندرويد
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('notification_icon');
 
+    // لينكس
     final LinuxInitializationSettings linuxSettings =
         LinuxInitializationSettings(defaultActionName: 'Open notification');
 
+    // ✅ ويندوز (الإضافة الجديدة لحل المشكلة)
+    // ✅ ويندوز (تمت إضافة المعرفات الإجبارية للإصدار الجديد)
+    final WindowsInitializationSettings windowsSettings =
+        WindowsInitializationSettings(
+          appName: 'Al Sakr',
+          appUserModelId: 'com.alsakr.app', // معرف فريد للتطبيق
+          guid:
+              '81a17932-d603-4f24-9b24-94f712431692', // معرف GUID عشوائي وفريد
+        );
+
+    // تجميع الإعدادات
     final InitializationSettings initSettings = InitializationSettings(
       android: androidSettings,
       linux: linuxSettings,
+      windows: windowsSettings, // 👈 لازم تمرر المتغير ده هنا
     );
 
     await _notificationsPlugin.initialize(
@@ -60,6 +70,7 @@ class PBHelper {
       onDidReceiveNotificationResponse: onNotificationTap,
     );
 
+    // طلب الصلاحيات (للأندرويد فقط)
     if (requestPermission) {
       if (Platform.isAndroid) {
         await _notificationsPlugin
@@ -69,9 +80,7 @@ class PBHelper {
             ?.requestNotificationsPermission();
       }
     }
-  }
-
-  // ============================================================
+  } // ============================================================
   // 🖼️ 2. دوال مساعدة عامة (Helpers)
   // ============================================================
 
