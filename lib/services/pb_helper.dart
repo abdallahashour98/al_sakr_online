@@ -15,8 +15,8 @@ class PBHelper {
       FlutterLocalNotificationsPlugin();
 
   // ✅ نستخدم late، وسيتم تهيئته في دالة init
-  late PocketBase pb;
-
+  // late PocketBase pb;
+  PocketBase pb = PocketBase(AppConfig.baseUrl);
   // Constructor خاص
   PBHelper._internal();
 
@@ -36,12 +36,16 @@ class PBHelper {
     );
 
     // 2. تهيئة PocketBase مع الرابط من constants.dart
+    // نقوم بتحديث الـ instance الموجود ليعمل مع الـ AuthStore المسترجع
     PBHelper().pb = PocketBase(AppConfig.baseUrl, authStore: store);
     print("✅ Connected to PocketBase: ${AppConfig.baseUrl}");
 
     // 3. إعدادات الإشعارات (Notifications)
+    // ✅ التعديل الصحيح:
+    // ✅ التعديل الصحيح:
+    // ✅ الصحيح:
     const AndroidInitializationSettings androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('notification_icon');
 
     final LinuxInitializationSettings linuxSettings =
         LinuxInitializationSettings(defaultActionName: 'Open notification');

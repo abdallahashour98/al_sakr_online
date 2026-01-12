@@ -16,7 +16,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLoading = false;
-  final String _appVersion = "2.0.0 (Online)";
+  final String _appVersion = "3.0.0 (Online)";
 
   // الكونترولرز (موجودين عشان يحافظوا على الداتا حتى لو مش ظاهرين)
   final TextEditingController _companyNameController = TextEditingController();
