@@ -13,9 +13,11 @@ import 'notification_service.dart';
 import 'background_listener.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
+import 'services/settings_service.dart';
+
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.system);
-final ValueNotifier<Locale> localeNotifier = ValueNotifier(const Locale('ar'));
+final ValueNotifier<Locale> localeNotifier = ValueNotifier(const Locale('en'));
 
 // ✅ دالة موحدة للتعامل مع الضغط على الإشعار
 void onNotificationTap(NotificationResponse details) {
@@ -32,6 +34,14 @@ void main() {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      final settings = SettingsService();
+      final savedTheme = await settings.getThemeMode();
+      themeNotifier.value = savedTheme;
+
+      // 2. تحميل اللغة
+      final savedLocale = await settings.getLocale();
+      localeNotifier.value = savedLocale;
+
       try {
         if (Platform.isAndroid) await Permission.notification.request();
 

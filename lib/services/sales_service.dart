@@ -8,7 +8,9 @@ class SalesService {
 
   // ==================== العملاء ====================
   Future<List<Map<String, dynamic>>> getClients() async {
-    final records = await pb.collection('clients').getFullList(sort: 'name');
+    final records = await pb
+        .collection('clients')
+        .getFullList(sort: 'name', filter: 'is_deleted = false');
     return records.map(PBHelper.recordToMap).toList();
   }
 
@@ -22,7 +24,7 @@ class SalesService {
   }
 
   Future<void> deleteClient(String id) async {
-    await pb.collection('clients').delete(id);
+    await pb.collection('clients').update(id, body: {'is_deleted': true});
   }
 
   Future<double> getClientOpeningBalance(String clientId) async {
@@ -197,10 +199,13 @@ class SalesService {
     String? startDate,
     String? endDate,
   }) async {
-    String filter = '';
+    // ✅ إضافة شرط (is_deleted = false) للفلتر
+    String filter = 'is_deleted = false';
+
     if (startDate != null && endDate != null) {
-      filter = 'date >= "$startDate" && date <= "$endDate"';
+      filter += ' && date >= "$startDate" && date <= "$endDate"';
     }
+
     final records = await pb
         .collection('sales')
         .getFullList(sort: '-date', expand: 'client', filter: filter);
@@ -665,5 +670,300 @@ class SalesService {
         .collection('receipts')
         .getFullList(filter: 'client = "$clientId"', sort: '-date');
     return records.map((e) => e.toJson()).toList();
+  }
+
+  // ✅ دالة الحذف الآمن (النسخة الشاملة التي لا تتعطل)
+  // ✅ دالة الحذف الآمن (تعالج المرتجعات وتمنع تضاعف المخزن)
+  Future<void> deleteSaleSafe(String saleId) async {
+    try {
+      // 1. جلب بيانات الفاتورة
+      final sale = await pb.collection('sales').getOne(saleId);
+      final isCredit = sale.data['paymentType'] != 'cash';
+      final clientId = sale.data['client'];
+      final netAmount =
+          (sale.data['netAmount'] ?? sale.data['totalAmount'] ?? 0).toDouble();
+
+      // 2. جلب الأصناف الأصلية
+      final items = await getSaleItems(saleId);
+
+      // 3. 🔥 جلب الكميات التي تم إرجاعها مسبقاً (عشان منرجعهاش تاني)
+      final returnedMap = await getAlreadyReturnedItems(saleId);
+
+      // 4. إرجاع البضاعة للمخزن (الصافي فقط)
+      for (var item in items) {
+        String prodId = '';
+        if (item['product'] is Map) {
+          prodId = item['product']['id'];
+        } else if (item['expand'] != null &&
+            item['expand']['product'] != null) {
+          prodId = item['expand']['product']['id'];
+        } else {
+          prodId = item['product']?.toString() ?? '';
+        }
+
+        if (prodId.isEmpty) continue;
+
+        // الكمية الأصلية في الفاتورة
+        int originalQty = (item['quantity'] as num).toInt();
+        // الكمية اللي رجعت قبل كدة
+        int alreadyReturned =
+            returnedMap[item['product']] ?? 0; // نستخدم item['product'] كـ ID
+
+        // ✅ الكمية اللي المفروض ترجع دلوقتي (الباقي عند العميل)
+        int qtyToRestock = originalQty - alreadyReturned;
+
+        if (qtyToRestock > 0) {
+          try {
+            final productRec = await pb.collection('products').getOne(prodId);
+            int currentStock = (productRec.data['stock'] as num).toInt();
+
+            await pb
+                .collection('products')
+                .update(prodId, body: {'stock': currentStock + qtyToRestock});
+          } catch (_) {}
+        }
+      }
+
+      // 5. تصحيح رصيد العميل
+      if (isCredit && clientId != null && clientId != "") {
+        try {
+          final clientRec = await pb.collection('clients').getOne(clientId);
+          double currentBalance = (clientRec.data['balance'] as num).toDouble();
+
+          // بنخصم قيمة الفاتورة الصافية (السيستم المفروض حاسبها صح بعد المرتجع)
+          // ملاحظة: لو المرتجع كان مخصوم من الفاتورة، يبقى netAmount مظبوط.
+          // لو المرتجع منفصل، يبقى لازم نراعي ده، بس للتبسيط هنفترض إن netAmount هو القيمة القائمة.
+          await pb
+              .collection('clients')
+              .update(clientId, body: {'balance': currentBalance - netAmount});
+        } catch (_) {}
+      }
+
+      // 6. 🔥 حذف سجلات المرتجعات المرتبطة (تنظيف الداتا)
+      try {
+        final relatedReturns = await pb
+            .collection('returns')
+            .getFullList(filter: 'sale = "$saleId"');
+        for (var ret in relatedReturns) {
+          await pb.collection('returns').delete(ret.id);
+        }
+      } catch (_) {}
+
+      // 7. حذف الأصناف والفاتورة
+      for (var item in items) {
+        await pb.collection('sale_items').delete(item['id']);
+      }
+      await pb.collection('sales').delete(saleId);
+    } catch (e) {
+      throw Exception("فشل الحذف: $e");
+    }
+  }
+
+  // ✅ دالة لجلب المبيعات المحذوفة مع بيانات العميل
+  Future<List<Map<String, dynamic>>> getDeletedSales() async {
+    final records = await pb
+        .collection('sales')
+        .getFullList(
+          filter: 'is_deleted = true',
+          sort: '-updated',
+          expand: 'client', // 👈 ده المهم عشان اسم العميل يظهر
+        );
+
+    return records.map((r) {
+      var map = PBHelper.recordToMap(r);
+      map['collectionName'] = 'sales';
+      return map;
+    }).toList();
+  }
+
+  // ✅ دالة لجلب العملاء المحذوفين
+  Future<List<Map<String, dynamic>>> getDeletedClients() async {
+    final records = await pb
+        .collection('clients')
+        .getFullList(filter: 'is_deleted = true', sort: '-updated');
+
+    return records.map((r) {
+      var map = PBHelper.recordToMap(r);
+      map['collectionName'] = 'clients';
+      return map;
+    }).toList();
+  }
+
+  // ✅ دالة لجلب المصروفات المحذوفة
+  Future<List<Map<String, dynamic>>> getDeletedExpenses() async {
+    // المصروفات عادة لا تحذف بـ flag ولكن بالحذف المباشر،
+    // ولكن إذا كنت تستخدم is_deleted، فهذا هو الكود:
+    final records = await pb
+        .collection('expenses')
+        .getFullList(filter: 'is_deleted = true', sort: '-updated');
+
+    return records.map((r) {
+      var map = PBHelper.recordToMap(r);
+      map['collectionName'] = 'expenses';
+      return map;
+    }).toList();
+  }
+
+  // ✅ دالة الحذف الآمن للمصروف (Soft Delete)
+  Future<void> deleteExpense(String id) async {
+    await pb.collection('expenses').update(id, body: {'is_deleted': true});
+  }
+  // ==================== إدارة سلة المهملات للمبيعات ====================
+
+  /// 🗑️ حذف مؤقت: يرجع البضاعة للمخزن ويخصم المديونية من العميل
+  Future<void> softDeleteSale(String saleId) async {
+    // 1. جلب بيانات الفاتورة والأصناف
+    final sale = await pb.collection('sales').getOne(saleId);
+    final items = await getSaleItems(saleId);
+
+    // لو الفاتورة محذوفة بالفعل، لا تفعل شيء
+    if (sale.data['is_deleted'] == true) return;
+
+    final isCredit = sale.data['paymentType'] != 'cash';
+    final clientId = sale.data['client'];
+    final netAmount = (sale.data['netAmount'] ?? 0).toDouble();
+
+    // 2. 🔥 إرجاع البضاعة للمخزن
+    for (var item in items) {
+      String prodId = '';
+      // استخراج ID المنتج بشكل آمن
+      if (item['product'] is Map) {
+        prodId = item['product']['id'];
+      } else if (item['expand'] != null && item['expand']['product'] != null) {
+        prodId = item['expand']['product']['id'];
+      } else {
+        prodId = item['product']?.toString() ?? '';
+      }
+
+      if (prodId.isNotEmpty) {
+        try {
+          // هات المنتج الحالي
+          final prod = await pb.collection('products').getOne(prodId);
+          int currentStock = (prod.data['stock'] as num).toInt();
+          int qty = (item['quantity'] as num).toInt();
+
+          // زود المخزون (ترجيع)
+          await pb
+              .collection('products')
+              .update(prodId, body: {'stock': currentStock + qty});
+        } catch (_) {}
+      }
+    }
+
+    // 3. 💰 تعديل رصيد العميل (لو آجل) -> بنشيل الفلوس من عليه
+    if (isCredit && clientId != null && clientId != "") {
+      try {
+        final clientRec = await pb.collection('clients').getOne(clientId);
+        double currentBalance = (clientRec.data['balance'] as num).toDouble();
+
+        await pb
+            .collection('clients')
+            .update(clientId, body: {'balance': currentBalance - netAmount});
+      } catch (_) {}
+    }
+
+    // 4. 📝 تعليم الفاتورة أنها محذوفة
+    await pb.collection('sales').update(saleId, body: {'is_deleted': true});
+  }
+
+  /// ♻️ استرجاع الفاتورة: يخصم البضاعة من المخزن ويعيد المديونية
+  Future<void> restoreSale(String saleId) async {
+    final sale = await pb.collection('sales').getOne(saleId);
+    final items = await getSaleItems(saleId);
+
+    // لو الفاتورة سليمة أصلاً، لا تفعل شيء
+    if (sale.data['is_deleted'] == false) return;
+
+    final isCredit = sale.data['paymentType'] != 'cash';
+    final clientId = sale.data['client'];
+    final netAmount = (sale.data['netAmount'] ?? 0).toDouble();
+
+    // 1. 🔥 خصم البضاعة من المخزن مرة أخرى
+    for (var item in items) {
+      String prodId = item['product'] is Map
+          ? item['product']['id']
+          : item['product'].toString();
+      int qty = (item['quantity'] as num).toInt();
+
+      try {
+        final prod = await pb.collection('products').getOne(prodId);
+        int currentStock = (prod.data['stock'] as num).toInt();
+
+        // خصم المخزون
+        await pb
+            .collection('products')
+            .update(prodId, body: {'stock': currentStock - qty});
+      } catch (_) {}
+    }
+
+    // 2. 💰 إعادة المديونية للعميل (لو آجل)
+    if (isCredit && clientId != null && clientId != "") {
+      try {
+        final clientRec = await pb.collection('clients').getOne(clientId);
+        double currentBalance = (clientRec.data['balance'] as num).toDouble();
+
+        await pb
+            .collection('clients')
+            .update(clientId, body: {'balance': currentBalance + netAmount});
+      } catch (_) {}
+    }
+
+    // 3. 📝 إزالة علامة الحذف
+    await pb.collection('sales').update(saleId, body: {'is_deleted': false});
+  }
+
+  /// ❌ حذف نهائي (فقط يحذف السجل لأن الأثر المالي اتشال في الـ Soft Delete)
+  Future<void> deleteSaleForever(String saleId) async {
+    // نقوم بحذف الأصناف أولاً
+    final items = await getSaleItems(saleId);
+    for (var item in items) {
+      await pb.collection('sale_items').delete(item['id']);
+    }
+    // حذف الفاتورة نفسها
+    await pb.collection('sales').delete(saleId);
+  }
+  // ==================== إدارة سلة مهملات أذونات التسليم ====================
+
+  // 1. جلب الأذونات المحذوفة
+  Future<List<Map<String, dynamic>>> getDeletedDeliveryOrders() async {
+    final records = await pb
+        .collection('delivery_orders')
+        .getFullList(
+          filter: 'is_deleted = true',
+          sort: '-updated',
+          expand: 'client', // عشان نجيب اسم العميل
+        );
+    return records.map((r) {
+      var map = PBHelper.recordToMap(r);
+      map['collectionName'] = 'delivery_orders';
+      return map;
+    }).toList();
+  }
+
+  // 2. حذف مؤقت (نقل للسلة)
+  Future<void> softDeleteDeliveryOrder(String id) async {
+    await pb
+        .collection('delivery_orders')
+        .update(id, body: {'is_deleted': true});
+  }
+
+  // 3. استرجاع من السلة
+  Future<void> restoreDeliveryOrder(String id) async {
+    await pb
+        .collection('delivery_orders')
+        .update(id, body: {'is_deleted': false});
+  }
+
+  // 4. حذف نهائي (مع العناصر التابعة له)
+  Future<void> deleteDeliveryOrderForever(String id) async {
+    // حذف تفاصيل الإذن أولاً
+    final items = await pb
+        .collection('delivery_order_items')
+        .getFullList(filter: 'delivery_order = "$id"');
+    for (var item in items) {
+      await pb.collection('delivery_order_items').delete(item.id);
+    }
+    // حذف الإذن نفسه
+    await pb.collection('delivery_orders').delete(id);
   }
 }

@@ -1,20 +1,12 @@
 import 'package:flutter/material.dart';
 import 'services/purchases_service.dart';
+import 'purchase_screen.dart'; // ✅ تأكد من استيراد شاشة الشراء
 
 /// ============================================================
 /// 📦 شاشة سجل المشتريات (Purchase History Screen)
 /// ============================================================
-/// الغرض:
-/// عرض أرشيف فواتير الشراء، تجميعها حسب الموردين، وإدارة مرتجعات الموردين.
-///
-/// الميزات الأساسية:
-/// 1. فلترة زمنية (شهرية).
-/// 2. تجميع الفواتير (Grouped List) لكل مورد.
-/// 3. إنشاء مرتجع شراء (Purchase Return) مع حساب الضرائب والخصومات نسبياً.
-/// 4. تعديل الأرقام المرجعية للفواتير (للمطابقة مع الفواتير الورقية).
 class PurchaseHistoryScreen extends StatefulWidget {
-  final DateTime?
-  initialDate; // 🔗 استقبال التاريخ لتوحيد السياق مع التقرير الشامل
+  final DateTime? initialDate;
   const PurchaseHistoryScreen({super.key, this.initialDate});
 
   @override
@@ -22,46 +14,47 @@ class PurchaseHistoryScreen extends StatefulWidget {
 }
 
 class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
-  late DateTime _selectedDate; // الشهر المحدد للعرض
+  late DateTime _selectedDate;
 
   // --- تخزين البيانات ---
-  /// خريطة لتجميع الفواتير: [اسم المورد] -> [قائمة الفواتير]
   Map<String, List<Map<String, dynamic>>> _groupedPurchases = {};
-  List<Map<String, dynamic>> _monthlyPurchases =
-      []; // قائمة مسطحة للفواتير (للحسابات)
+  List<Map<String, dynamic>> _monthlyPurchases = [];
 
   bool _isLoading = true;
 
   // --- خرائط التتبع ---
-  /// خريطة تربط [رقم الفاتورة] -> [قيمة المرتجعات التي تمت عليها]
-  /// تستخدم لتلوين الفاتورة باللون الأحمر إذا كانت مرتجعة بالكامل
   Map<String, double> _invoiceReturnsMap = {};
 
   // --- الإجماليات المالية للشهر ---
-  double _totalMonthPurchases = 0.0; // إجمالي الفواتير
-  double _totalMonthReturns = 0.0; // إجمالي المرتجعات المسجلة هذا الشهر
-  double _netMonthMovement = 0.0; // الصافي (مشتريات - مرتجعات)
+  double _totalMonthPurchases = 0.0;
+  double _totalMonthReturns = 0.0;
+  double _netMonthMovement = 0.0;
 
   // --- الصلاحيات ---
   bool _canAddReturn = false;
+  // يمكنك إضافة صلاحيات للحذف والتعديل هنا إذا أردت
+  bool _canDelete = true;
+
   final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
-    // استخدام التاريخ المرر أو التاريخ الحالي كافتراضي
     _selectedDate = widget.initialDate ?? DateTime.now();
     _loadPermissions();
     _loadData();
   }
 
-  /// تحميل الصلاحيات (هل المستخدم مسموح له يضيف مشتريات/مرتجعات؟)
   Future<void> _loadPermissions() async {
     final myId = PurchasesService().pb.authStore.record?.id;
     if (myId == null) return;
 
     if (myId == _superAdminId) {
-      if (mounted) setState(() => _canAddReturn = true);
+      if (mounted)
+        setState(() {
+          _canAddReturn = true;
+          _canDelete = true;
+        });
       return;
     }
 
@@ -72,6 +65,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
       if (mounted) {
         setState(() {
           _canAddReturn = userRecord.data['allow_add_purchases'] ?? false;
+          // يمكنك إضافة حقول صلاحيات للحذف والتعديل في الداتا بيز لاحقاً
         });
       }
     } catch (e) {
@@ -79,7 +73,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
     }
   }
 
-  /// تغيير الشهر وإعادة تحميل البيانات
   void _changeMonth(int offset) {
     setState(() {
       _selectedDate = DateTime(
@@ -92,9 +85,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
     _loadData();
   }
 
-  /// 📥 دالة جلب البيانات (Core Logic)
   void _loadData() async {
-    // 1. تحديد نطاق التاريخ (من أول ثانية في الشهر لآخر ثانية)
     DateTime startOfMonth = DateTime(
       _selectedDate.year,
       _selectedDate.month,
@@ -113,7 +104,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
     String endStr = endOfMonth.toIso8601String();
 
     try {
-      // 2. جلب البيانات من السيرفس (فواتير ومرتجعات هذا الشهر)
       final purchasesData = await PurchasesService().getPurchases(
         startDate: startStr,
         endDate: endStr,
@@ -122,33 +112,25 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
         startDate: startStr,
         endDate: endStr,
       );
-
-      // نجيب *كل* المرتجعات عشان نعرف حالة الفاتورة (حتى لو المرتجع حصل في شهر تاني)
       final allReturnsForStatus = await PurchasesService()
           .getAllPurchaseReturns();
 
-      // 3. معالجة البيانات والحسابات
       double totalPurchasesVal = 0.0;
       Map<String, List<Map<String, dynamic>>> grouped = {};
 
       for (var invoice in purchasesData) {
         String supplierName = invoice['supplierName'] ?? 'مورد غير معروف';
         grouped.putIfAbsent(supplierName, () => []).add(invoice);
-
-        // totalAmount هنا هو الصافي النهائي للفاتورة
         totalPurchasesVal += (invoice['totalAmount'] as num).toDouble();
       }
 
-      // إجمالي المرتجعات المالية (كمعاملة مالية تمت في هذا الشهر)
       double totalReturnsVal = returnsThisMonth.fold(
         0.0,
         (sum, item) => sum + (item['totalAmount'] as num).toDouble(),
       );
 
-      // بناء خريطة حالة الفواتير
       Map<String, double> returnsMap = {};
       for (var ret in allReturnsForStatus) {
-        // دعم للحقول المختلفة (purchase أو invoiceId حسب تحديثات الداتابيز)
         String invId =
             ret['purchase']?.toString() ?? ret['invoiceId']?.toString() ?? '';
         if (invId.isNotEmpty) {
@@ -162,12 +144,9 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
           _monthlyPurchases = purchasesData;
           _groupedPurchases = grouped;
           _invoiceReturnsMap = returnsMap;
-
           _totalMonthPurchases = totalPurchasesVal;
           _totalMonthReturns = totalReturnsVal;
-          // الصافي = المشتريات - المرتجعات
           _netMonthMovement = _totalMonthPurchases - _totalMonthReturns;
-
           _isLoading = false;
         });
       }
@@ -202,15 +181,115 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
   }
 
   // ============================================================
-  // 🛠️ أدوات التعديل والإجراءات (Actions)
+  // ⚙️ العمليات الجديدة (حذف - تعديل)
+  // ============================================================
+  // 1. حذف الفاتورة (نقل لسلة المهملات)
+  Future<void> _deletePurchase(String purchaseId) async {
+    bool confirm =
+        await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text("حذف الفاتورة"), // غير العنوان ليكون مناسب
+            content: const Text(
+              "هل تريد نقل الفاتورة إلى سلة المهملات؟\nسيتم خصم البضاعة من المخزن مؤقتاً.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("إلغاء"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text(
+                  "نقل للسلة",
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (confirm) {
+      try {
+        // ❌ القديم: كان بيحذف نهائي
+        // await PurchasesService().deletePurchaseSafe(purchaseId);
+
+        // ✅ الجديد: نقل لسلة المهملات
+        await PurchasesService().softDeletePurchase(purchaseId);
+
+        _loadData(); // تحديث الشاشة
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("تم نقل الفاتورة لسلة المهملات ♻️"),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("خطأ: $e")));
+      }
+    }
+  }
+
+  // 2. تعديل الفاتورة (فتح شاشة الشراء بالبيانات القديمة)
+  Future<void> _modifyPurchase(Map<String, dynamic> purchase) async {
+    // منع التعديل لو فيه مرتجع حفاظاً على الحسابات
+    double returnedTotal = _invoiceReturnsMap[purchase['id']] ?? 0.0;
+    if (returnedTotal > 0) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("تنبيه"),
+          content: const Text(
+            "لا يمكن تعديل الفاتورة لوجود مرتجعات سابقة.\nيرجى حذف المرتجع أولاً.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("موافق"),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      // جلب الأصناف
+      final items = await PurchasesService().getPurchaseItems(purchase['id']);
+      setState(() => _isLoading = false);
+
+      if (!mounted) return;
+
+      // الانتقال لشاشة الشراء في وضع التعديل
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) =>
+              PurchaseScreen(oldPurchaseData: purchase, initialItems: items),
+        ),
+      );
+
+      _loadData(); // تحديث القائمة بعد العودة
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("خطأ في جلب البيانات: $e")));
+    }
+  }
+
+  // ============================================================
+  // 🛠️ أدوات التعديل والإجراءات القديمة
   // ============================================================
 
-  /// حوار تعديل الرقم المرجعي للفاتورة (لتطابق الفاتورة الورقية)
   void _showEditRefDialog(Map<String, dynamic> invoice) {
     final refController = TextEditingController(
       text: invoice['referenceNumber']?.toString() ?? '',
     );
-
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -236,7 +315,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                 );
                 if (mounted) {
                   Navigator.pop(ctx);
-                  _loadData(); // تحديث الواجهة
+                  _loadData();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text("تم التعديل بنجاح ✅"),
@@ -260,23 +339,18 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
     );
   }
 
-  /// ↩️ دالة معالج مرتجع المشتريات (Purchase Return Logic)
-  /// تقوم بحساب قيمة المرتجع بناءً على سعر التكلفة ونسبة الخصم والضرائب في الفاتورة الأصلية
   void _showPurchaseReturnDialog(
     Map<String, dynamic> invoice,
     List<Map<String, dynamic>> items,
   ) {
     if (!_canAddReturn) return;
 
-    // جلب قيم الضرائب والخصومات من الفاتورة الأصلية
     double invTax = (invoice['taxAmount'] as num?)?.toDouble() ?? 0.0;
     double invWht = (invoice['whtAmount'] as num?)?.toDouble() ?? 0.0;
     double invDiscount = (invoice['discount'] as num?)?.toDouble() ?? 0.0;
-
     bool hasTax = invTax > 0.1;
     bool hasWht = invWht > 0.1;
 
-    // حساب إجمالي الأصناف الأصلي (لحساب نسبة الخصم)
     double originalItemsTotal = items.fold(
       0.0,
       (sum, item) =>
@@ -292,10 +366,9 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setStateDialog) {
-          double returnBaseTotal = 0; // إجمالي الأصناف المرتجعة (سعر تكلفة)
+          double returnBaseTotal = 0;
           List<Map<String, dynamic>> itemsToReturn = [];
 
-          // تجميع الأصناف المختارة
           for (var item in items) {
             String prodId = item['product'];
             int qty = returnQuantities[prodId] ?? 0;
@@ -310,8 +383,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
             }
           }
 
-          // 🧮 الحسابات التناسبية (Proportional Math)
-          // لو الفاتورة كان عليها خصم، لازم المرتجع يتخصم منه نفس النسبة
           double returnDiscount = 0.0;
           if (originalItemsTotal > 0 && invDiscount > 0) {
             double ratio = returnBaseTotal / originalItemsTotal;
@@ -319,12 +390,8 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
           }
 
           double netReturnBase = returnBaseTotal - returnDiscount;
-
-          // حساب الضرائب المستردة
           double returnTaxVal = hasTax ? netReturnBase * 0.14 : 0.0;
           double returnWhtVal = hasWht ? netReturnBase * 0.01 : 0.0;
-
-          // المعادلة النهائية للمرتجع
           double finalReturnTotal = netReturnBase + returnTaxVal - returnWhtVal;
 
           final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -358,8 +425,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   const SizedBox(height: 10),
-
-                  // قائمة الأصناف
                   Flexible(
                     child: ListView.separated(
                       shrinkWrap: true,
@@ -394,7 +459,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                                     ),
                                     Text(
                                       "سعر: ${item['costPrice']}",
-                                      style: TextStyle(
+                                      style: const TextStyle(
                                         color: Colors.grey,
                                         fontSize: 11,
                                       ),
@@ -402,7 +467,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                                   ],
                                 ),
                               ),
-                              // أزرار التحكم في الكمية (+ / -)
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -482,8 +546,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                     color: Colors.blue,
                   ),
                   const SizedBox(height: 15),
-
-                  // أزرار التأكيد
                   Row(
                     children: [
                       Expanded(
@@ -500,7 +562,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                           ),
                           onPressed: finalReturnTotal > 0
                               ? () async {
-                                  // إنشاء المرتجع في قاعدة البيانات
                                   await PurchasesService().createPurchaseReturn(
                                     invoice['id'],
                                     invoice['supplier'] ??
@@ -540,19 +601,14 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
   // ============================================================
 
   Widget _buildInvoiceCard(Map<String, dynamic> invoice, bool isDark) {
-    // قراءة القيم المالية
     double savedFinalTotal = (invoice['totalAmount'] as num).toDouble();
     double tax = (invoice['taxAmount'] as num?)?.toDouble() ?? 0.0;
     double wht = (invoice['whtAmount'] as num?)?.toDouble() ?? 0.0;
     double discount = (invoice['discount'] as num?)?.toDouble() ?? 0.0;
-
-    // حساب إجمالي الأصناف قبل الإضافات (للعرض فقط)
     double calculatedSubTotal = savedFinalTotal - tax + wht + discount;
 
     double returnedTotal = _invoiceReturnsMap[invoice['id']] ?? 0.0;
     bool isCash = (invoice['paymentType'] == 'cash');
-
-    // هل الفاتورة مرتجعة بالكامل؟
     bool isFullyReturned =
         (returnedTotal >= savedFinalTotal - 0.1) && savedFinalTotal > 0;
 
@@ -581,7 +637,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // بادج طريقة الدفع
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -619,45 +674,71 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
             ),
           ],
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
-              tooltip: "تعديل الرقم",
-              onPressed: () => _showEditRefDialog(invoice),
+        // ✅✅ القائمة الجديدة (Three Dots) ✅✅
+        trailing: PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, color: Colors.blue),
+          onSelected: (value) {
+            if (value == 'edit_ref') _showEditRefDialog(invoice);
+            if (value == 'modify') _modifyPurchase(invoice); // تعديل الأصناف
+            if (value == 'return') {
+              // جلب الأصناف ثم فتح الديالوج
+              PurchasesService().getPurchaseItems(invoice['id']).then((items) {
+                if (mounted) _showPurchaseReturnDialog(invoice, items);
+              });
+            }
+            if (value == 'delete') _deletePurchase(invoice['id']); // حذف نهائي
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'edit_ref',
+              child: Row(
+                children: [
+                  Icon(Icons.edit, color: Colors.blue, size: 20),
+                  SizedBox(width: 8),
+                  Text("تعديل الرقم المرجعي"),
+                ],
+              ),
             ),
-            if (isFullyReturned)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(5),
-                  border: Border.all(color: Colors.red),
+            // ✅ خيار التعديل
+            if (!isFullyReturned)
+              const PopupMenuItem(
+                value: 'modify',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_note, color: Colors.orange, size: 20),
+                    SizedBox(width: 8),
+                    Text("تعديل الأصناف"),
+                  ],
                 ),
-                child: const Text(
-                  "مرتجع",
-                  style: TextStyle(
-                    color: Colors.red,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
+              ),
+            // ✅ خيار المرتجع
+            if (_canAddReturn && !isFullyReturned)
+              const PopupMenuItem(
+                value: 'return',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.assignment_return,
+                      color: Colors.purple,
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Text("عمل مرتجع"),
+                  ],
                 ),
-              )
-            else if (_canAddReturn)
-              IconButton(
-                icon: const Icon(
-                  Icons.assignment_return,
-                  size: 18,
-                  color: Colors.red,
+              ),
+            const PopupMenuDivider(),
+            // ✅ خيار الحذف
+            if (_canDelete)
+              const PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete, color: Colors.red, size: 20),
+                    SizedBox(width: 8),
+                    Text("حذف الفاتورة"),
+                  ],
                 ),
-                tooltip: "مرتجع",
-                onPressed: () async {
-                  final items = await PurchasesService().getPurchaseItems(
-                    invoice['id'],
-                  );
-                  if (mounted) _showPurchaseReturnDialog(invoice, items);
-                },
               ),
           ],
         ),
@@ -740,16 +821,11 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
     );
   }
 
-  // ... (دوال مساعدة للعرض _showItemsBottomSheet, _buildDetailRow, etc...)
-  // تم تبسيطها هنا للتركيز، لكن الكود الأصلي يحتوي عليها
   void _showItemsBottomSheet(Map<String, dynamic> invoice) async {
-    // (نفس الكود الخاص بعرض الأصناف، لكنه يستخدم Cost Price بدل السعر البيع)
     final items = await PurchasesService().getPurchaseItems(invoice['id']);
-    // ... rest of the code for bottom sheet
     if (!mounted) return;
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
     double savedFinalTotal = (invoice['totalAmount'] as num).toDouble();
     double tax = (invoice['taxAmount'] as num?)?.toDouble() ?? 0.0;
     double wht = (invoice['whtAmount'] as num?)?.toDouble() ?? 0.0;
@@ -792,7 +868,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -803,9 +878,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                   Text(displayId, style: TextStyle(color: Colors.grey[600])),
                 ],
               ),
-
               const Divider(),
-
               Expanded(
                 child: ListView.builder(
                   controller: scrollController,
@@ -835,9 +908,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                   ),
                 ),
               ),
-
               const Divider(),
-
               Container(
                 padding: const EdgeInsets.all(15),
                 decoration: BoxDecoration(
@@ -1032,7 +1103,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
       ),
       body: Column(
         children: [
-          // 1. الشريط العلوي (ملخص سريع)
           Container(
             padding: const EdgeInsets.all(15),
             color: isDark
@@ -1077,8 +1147,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
               ],
             ),
           ),
-
-          // 2. قائمة الفواتير المجمعة
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -1095,8 +1163,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                       );
                       List<Map<String, dynamic>> invoices =
                           _groupedPurchases[supplierName]!;
-
-                      // حساب إجمالي المورد (ظاهرياً)
                       double totalSupplierPurchases = invoices.fold(
                         0,
                         (sum, item) =>
@@ -1138,8 +1204,6 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                     },
                   ),
           ),
-
-          // 3. الشريط السفلي (الصافي)
           SafeArea(
             child: Container(
               padding: const EdgeInsets.all(15),

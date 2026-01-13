@@ -115,7 +115,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("حذف المورد"),
-        content: const Text("تأكيد الحذف؟"),
+        content: const Text("هل تريد نقل هذا المورد إلى سلة المهملات؟"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -125,9 +125,29 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
               Navigator.pop(ctx);
-              await PurchasesService().deleteSupplier(id);
+              try {
+                // 1. استدعاء دالة النقل للسلة من السيرفس
+                await PurchasesService().deleteSupplier(id);
+
+                // 2. تحديث الإحصائيات (الأرقام اللي فوق)
+                // القائمة نفسها هتتحدث لوحدها عشان StreamBuilder
+                _loadStaticStats();
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("تم نقل المورد للسلة ♻️")),
+                  );
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text("خطأ: $e")));
+              }
             },
-            child: const Text("حذف", style: TextStyle(color: Colors.white)),
+            child: const Text(
+              "نقل للسلة",
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -154,15 +174,15 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
             return const Center(child: CircularProgressIndicator());
 
           final allSuppliers = snapshot.data!;
-          final filtered = allSuppliers
-              .where(
-                (s) =>
-                    _searchQuery.isEmpty ||
-                    s['name'].toString().toLowerCase().contains(
-                      _searchQuery.toLowerCase(),
-                    ),
-              )
-              .toList();
+          final filtered = allSuppliers.where((s) {
+            // ✅ إخفاء المحذوف
+            if (s['is_deleted'] == true) return false;
+
+            return _searchQuery.isEmpty ||
+                s['name'].toString().toLowerCase().contains(
+                  _searchQuery.toLowerCase(),
+                );
+          }).toList();
 
           double totalDebt = 0.0;
           for (var s in filtered) {

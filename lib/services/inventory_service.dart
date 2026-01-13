@@ -10,7 +10,11 @@ class InventoryService {
   Future<List<Map<String, dynamic>>> getProducts() async {
     final records = await pb
         .collection('products')
-        .getFullList(sort: '-created', expand: 'supplier');
+        .getFullList(
+          sort: '-created',
+          expand: 'supplier',
+          filter: 'is_deleted = false',
+        );
     return records.map((r) {
       var map = PBHelper.recordToMap(r);
       if (map['image'] != null && map['image'].toString().isNotEmpty) {
@@ -80,8 +84,25 @@ class InventoryService {
     return await pb.collection('products').update(id, body: body, files: files);
   }
 
+  // ✅ دالة لجلب المنتجات المحذوفة مع بيانات المورد
+  Future<List<Map<String, dynamic>>> getDeletedProducts() async {
+    final records = await pb
+        .collection('products')
+        .getFullList(
+          filter: 'is_deleted = true',
+          sort: '-updated',
+          expand: 'supplier', // 👈 لجلب اسم المورد
+        );
+
+    return records.map((r) {
+      var map = PBHelper.recordToMap(r);
+      map['collectionName'] = 'products';
+      return map;
+    }).toList();
+  }
+
   Future<void> deleteProduct(String id) async {
-    await pb.collection('products').delete(id);
+    await pb.collection('products').update(id, body: {'is_deleted': true});
   }
 
   // --- الوحدات ---

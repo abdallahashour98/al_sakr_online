@@ -8,7 +8,9 @@ class PurchasesService {
 
   // ==================== الموردين ====================
   Future<List<Map<String, dynamic>>> getSuppliers() async {
-    final records = await pb.collection('suppliers').getFullList(sort: 'name');
+    final records = await pb
+        .collection('suppliers')
+        .getFullList(sort: 'name', filter: 'is_deleted = false');
     return records.map(PBHelper.recordToMap).toList();
   }
 
@@ -24,8 +26,10 @@ class PurchasesService {
     return await pb.collection('suppliers').update(id, body: body);
   }
 
+  // ✅ دالة الحذف الآمن للمورد (Soft Delete)
   Future<void> deleteSupplier(String id) async {
-    await pb.collection('suppliers').delete(id);
+    // بدل delete(id) بنستخدم update لتغيير الحالة فقط
+    await pb.collection('suppliers').update(id, body: {'is_deleted': true});
   }
 
   Future<double> getSupplierOpeningBalance(String supplierId) async {
@@ -227,11 +231,42 @@ class PurchasesService {
     final records = await pb
         .collection('purchase_items')
         .getFullList(filter: 'purchase = "$purchaseId"', expand: 'product');
-    return records.map((e) {
-      final map = PBHelper.recordToMap(e);
-      if (e.expand.containsKey('product')) {
-        map['productName'] = e.expand['product']![0].data['name'];
+    return records.map((r) {
+      var map = PBHelper.recordToMap(r);
+      if (r.expand.containsKey('product')) {
+        map['productName'] = r.expand['product']?.first.data['name'];
       }
+      return map;
+    }).toList();
+  }
+
+  // ✅ دالة لجلب المشتريات المحذوفة مع بيانات المورد
+  Future<List<Map<String, dynamic>>> getDeletedPurchases() async {
+    final records = await pb
+        .collection('purchases')
+        .getFullList(
+          filter: 'is_deleted = true',
+          sort: '-updated',
+          expand: 'supplier', // 👈 ده المهم عشان الاسم يظهر
+        );
+
+    return records.map((r) {
+      var map = PBHelper.recordToMap(r);
+      map['collectionName'] =
+          'purchases'; // لازم نضيف ده عشان TrashScreen تفهمه
+      return map;
+    }).toList();
+  }
+
+  // ✅ دالة لجلب الموردين المحذوفين
+  Future<List<Map<String, dynamic>>> getDeletedSuppliers() async {
+    final records = await pb
+        .collection('suppliers')
+        .getFullList(filter: 'is_deleted = true', sort: '-updated');
+
+    return records.map((r) {
+      var map = PBHelper.recordToMap(r);
+      map['collectionName'] = 'suppliers';
       return map;
     }).toList();
   }
@@ -325,6 +360,98 @@ class PurchasesService {
         .collection('purchase_returns')
         .getFullList(sort: '-date', expand: 'supplier', filter: filter);
     return records.map(PBHelper.recordToMap).toList();
+  }
+
+  // 🔍 دالة مساعدة: معرفة الكميات التي تم إرجاعها مسبقاً من فاتورة معينة
+  Future<Map<String, int>> getAlreadyReturnedItems(String purchaseId) async {
+    Map<String, int> result = {};
+    try {
+      final returns = await pb
+          .collection('purchase_return_items')
+          .getFullList(filter: 'purchase_return.purchase = "$purchaseId"');
+      for (var item in returns) {
+        String prodId = item.data['product'];
+        int qty = (item.data['quantity'] as num).toInt();
+        result[prodId] = (result[prodId] ?? 0) + qty;
+      }
+    } catch (_) {}
+    return result;
+  }
+
+  // 🗑️ دالة الحذف الآمن لفاتورة المشتريات (تخصم من المخزن والرصيد)
+  Future<void> deletePurchaseSafe(String purchaseId) async {
+    try {
+      // 1. جلب بيانات الفاتورة
+      final purchase = await pb.collection('purchases').getOne(purchaseId);
+      final isCredit = purchase.data['paymentType'] != 'cash';
+      final supplierId = purchase.data['supplier'];
+      final totalAmount = (purchase.data['totalAmount'] as num).toDouble();
+
+      // 2. جلب الأصناف الأصلية
+      final items = await getPurchaseItems(purchaseId);
+
+      // 3. جلب ما تم إرجاعه مسبقاً (عشان منخصمش من المخزن مرتين)
+      final returnedMap = await getAlreadyReturnedItems(purchaseId);
+
+      // 4. خصم البضاعة من المخزن (الصافي فقط)
+      for (var item in items) {
+        String prodId = item['product'];
+        int originalQty = (item['quantity'] as num).toInt();
+        int alreadyReturned = returnedMap[prodId] ?? 0;
+
+        // الكمية اللي دخلت المخزن ولسه موجودة (ولازم نشيلها عشان بنحذف الفاتورة)
+        int qtyToRemove = originalQty - alreadyReturned;
+
+        if (qtyToRemove > 0) {
+          try {
+            final productRec = await pb.collection('products').getOne(prodId);
+            int currentStock = (productRec.data['stock'] as num).toInt();
+
+            // 🔻 هنا الفرق الجوهري عن المبيعات: المشتريات بتزود المخزن، فالحذف ينقصه
+            await pb
+                .collection('products')
+                .update(prodId, body: {'stock': currentStock - qtyToRemove});
+          } catch (_) {}
+        }
+      }
+
+      // 5. تصحيح رصيد المورد (لو آجل)
+      if (isCredit && supplierId != null && supplierId != "") {
+        try {
+          final supplierRec = await pb
+              .collection('suppliers')
+              .getOne(supplierId);
+          double currentBalance = (supplierRec.data['balance'] as num)
+              .toDouble();
+
+          // المديونية كانت زادت، دلوقتي بنقللها
+          await pb
+              .collection('suppliers')
+              .update(
+                supplierId,
+                body: {'balance': currentBalance - totalAmount},
+              );
+        } catch (_) {}
+      }
+
+      // 6. حذف سجلات المرتجعات المرتبطة (تنظيف)
+      try {
+        final relatedReturns = await pb
+            .collection('purchase_returns')
+            .getFullList(filter: 'purchase = "$purchaseId"');
+        for (var ret in relatedReturns) {
+          await pb.collection('purchase_returns').delete(ret.id);
+        }
+      } catch (_) {}
+
+      // 7. حذف الأصناف والفاتورة نفسها
+      for (var item in items) {
+        await pb.collection('purchase_items').delete(item['id']);
+      }
+      await pb.collection('purchases').delete(purchaseId);
+    } catch (e) {
+      throw Exception("فشل حذف فاتورة المشتريات: $e");
+    }
   }
 
   Future<List<Map<String, dynamic>>> getPurchaseReturnItems(
@@ -504,7 +631,7 @@ class PurchasesService {
   Future<List<Map<String, dynamic>>> getExpenses() async {
     final records = await pb
         .collection('expenses')
-        .getFullList(sort: '-created');
+        .getFullList(sort: '-created', filter: 'is_deleted = false');
     return records.map(PBHelper.recordToMap).toList();
   }
 
@@ -518,6 +645,109 @@ class PurchasesService {
   }
 
   Future<void> deleteExpense(String id) async {
-    await pb.collection('expenses').delete(id);
+    await pb.collection('expenses').update(id, body: {'is_deleted': true});
+  }
+  // ==================== إدارة سلة المهملات للمشتريات ====================
+
+  /// 🗑️ حذف مؤقت: يخصم البضاعة من المخزن ويقلل مديونية المورد
+  Future<void> softDeletePurchase(String purchaseId) async {
+    final purchase = await pb.collection('purchases').getOne(purchaseId);
+
+    // جلب الأصناف (تأكد أن عندك دالة getPurchaseItems مشابهة للمبيعات)
+    final items = await pb
+        .collection('purchase_items')
+        .getFullList(filter: 'purchase = "$purchaseId"');
+
+    if (purchase.data['is_deleted'] == true) return;
+
+    final isCredit = purchase.data['paymentType'] != 'cash';
+    final supplierId = purchase.data['supplier'];
+    final totalAmount = (purchase.data['totalAmount'] ?? 0).toDouble();
+
+    // 1. 🔥 خصم البضاعة من المخزن (لأننا لغينا الشراء)
+    for (var item in items) {
+      String prodId = item.data['product'];
+      int qty = (item.data['quantity'] as num).toInt();
+
+      try {
+        final prod = await pb.collection('products').getOne(prodId);
+        int currentStock = (prod.data['stock'] as num).toInt();
+
+        await pb
+            .collection('products')
+            .update(
+              prodId,
+              body: {
+                'stock': currentStock - qty, // نقص المخزون
+              },
+            );
+      } catch (_) {}
+    }
+
+    // 2. 💰 تعديل حساب المورد
+    if (isCredit && supplierId != null && supplierId != "") {
+      try {
+        final suppRec = await pb.collection('suppliers').getOne(supplierId);
+        double currentBal = (suppRec.data['balance'] as num).toDouble();
+
+        await pb
+            .collection('suppliers')
+            .update(
+              supplierId,
+              body: {
+                'balance': currentBal - totalAmount, // شيل الفلوس من عليه
+              },
+            );
+      } catch (_) {}
+    }
+
+    await pb
+        .collection('purchases')
+        .update(purchaseId, body: {'is_deleted': true});
+  }
+
+  /// ♻️ استرجاع الشراء: يزود المخزن ويعيد مديونية المورد
+  Future<void> restorePurchase(String purchaseId) async {
+    final purchase = await pb.collection('purchases').getOne(purchaseId);
+    final items = await pb
+        .collection('purchase_items')
+        .getFullList(filter: 'purchase = "$purchaseId"');
+
+    if (purchase.data['is_deleted'] == false) return;
+
+    final isCredit = purchase.data['paymentType'] != 'cash';
+    final supplierId = purchase.data['supplier'];
+    final totalAmount = (purchase.data['totalAmount'] ?? 0).toDouble();
+
+    // 1. 🔥 إعادة البضاعة للمخزن
+    for (var item in items) {
+      String prodId = item.data['product'];
+      int qty = (item.data['quantity'] as num).toInt();
+
+      try {
+        final prod = await pb.collection('products').getOne(prodId);
+        int currentStock = (prod.data['stock'] as num).toInt();
+
+        await pb
+            .collection('products')
+            .update(prodId, body: {'stock': currentStock + qty});
+      } catch (_) {}
+    }
+
+    // 2. 💰 إعادة حساب المورد
+    if (isCredit && supplierId != null && supplierId != "") {
+      try {
+        final suppRec = await pb.collection('suppliers').getOne(supplierId);
+        double currentBal = (suppRec.data['balance'] as num).toDouble();
+
+        await pb
+            .collection('suppliers')
+            .update(supplierId, body: {'balance': currentBal + totalAmount});
+      } catch (_) {}
+    }
+
+    await pb
+        .collection('purchases')
+        .update(purchaseId, body: {'is_deleted': false});
   }
 }

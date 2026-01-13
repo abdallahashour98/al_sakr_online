@@ -1,7 +1,7 @@
 import 'package:al_sakr/services/sales_service.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'PdfService.dart';
+import 'pdf/PdfService.dart';
 import 'services/inventory_service.dart';
 import 'product_search_dialog.dart';
 
@@ -125,6 +125,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
 
     // فلترة القائمة حسب التاريخ المختار
     final filteredOrders = rawOrders.where((order) {
+      if (order['is_deleted'] == true) return false;
       if (order['date'] == null) return false;
       DateTime orderDate = DateTime.parse(order['date']);
       return orderDate.isAfter(
@@ -816,8 +817,10 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("حذف"),
-        content: const Text("هل أنت متأكد من حذف هذا الإذن؟"),
+        title: const Text("حذف الإذن"),
+        content: const Text(
+          "هل تريد نقل هذا الإذن إلى سلة المهملات؟",
+        ), // ✅ تغيير الرسالة
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -825,10 +828,13 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen> {
           ),
           TextButton(
             onPressed: () async {
-              await SalesService().deleteDeliveryOrder(id);
               Navigator.pop(ctx);
+              // ✅ استدعاء دالة النقل للسلة بدلاً من الحذف النهائي
+              await SalesService().softDeleteDeliveryOrder(id);
+
+              // (ملاحظة: بما إنك عامل subscribe في initState، القائمة هتتحدث لوحدها وتخفي العنصر)
             },
-            child: const Text("حذف", style: TextStyle(color: Colors.red)),
+            child: const Text("نقل للسلة", style: TextStyle(color: Colors.red)),
           ),
         ],
       ),

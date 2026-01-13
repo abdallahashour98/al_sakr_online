@@ -4,6 +4,7 @@ import 'package:al_sakr/services/sales_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'services/pb_helper.dart';
+import 'package:intl/intl.dart' as intl;
 
 enum ExpenseFilter { monthly, yearly }
 
@@ -15,14 +16,14 @@ class ExpensesScreen extends StatefulWidget {
 }
 
 class _ExpensesScreenState extends State<ExpensesScreen> {
-  // متغيرات الفلتر
+  // متغيرات الفلتر والبحث
   ExpenseFilter _filterType = ExpenseFilter.monthly;
   DateTime _selectedDate = DateTime.now();
+  String _searchQuery = ""; // ✅ متغير البحث الجديد
+  final TextEditingController _searchController =
+      TextEditingController(); // ✅ كنترولر البحث
 
-  List<Map<String, dynamic>> _expensesList = [];
-  bool _isLoading = true;
-  double _totalExpenses = 0.0;
-
+  // متغيرات الصلاحيات
   bool _canAdd = false;
   bool _canDelete = false;
   final String _superAdminId = "1sxo74splxbw1yh";
@@ -45,15 +46,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   void initState() {
     super.initState();
     _loadPermissions();
-    _loadData();
-    // الاشتراك في التحديثات اللحظية
-    PBHelper().pb.collection('expenses').subscribe('*', (e) => _loadData());
-  }
-
-  @override
-  void dispose() {
-    PBHelper().pb.collection('expenses').unsubscribe('*');
-    super.dispose();
   }
 
   Future<void> _loadPermissions() async {
@@ -61,11 +53,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (myId == null) return;
 
     if (myId == _superAdminId) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _canAdd = true;
           _canDelete = true;
         });
+      }
       return;
     }
 
@@ -79,7 +72,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           _canDelete = userRecord.data['allow_delete_expenses'] ?? false;
         });
       }
-    } catch (e) {}
+    } catch (e) {
+      // ignore error
+    }
   }
 
   void _changeDate(int offset) {
@@ -93,56 +88,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       } else {
         _selectedDate = DateTime(_selectedDate.year + offset, 1, 1);
       }
-      _isLoading = true;
     });
-    _loadData();
-  }
-
-  Future<void> _loadData() async {
-    // تحديد نطاق التاريخ
-    String startDate, endDate;
-    if (_filterType == ExpenseFilter.monthly) {
-      DateTime start = DateTime(_selectedDate.year, _selectedDate.month, 1);
-      DateTime end = DateTime(
-        _selectedDate.year,
-        _selectedDate.month + 1,
-        0,
-        23,
-        59,
-        59,
-      );
-      startDate = start.toIso8601String();
-      endDate = end.toIso8601String();
-    } else {
-      DateTime start = DateTime(_selectedDate.year, 1, 1);
-      DateTime end = DateTime(_selectedDate.year, 12, 31, 23, 59, 59);
-      startDate = start.toIso8601String();
-      endDate = end.toIso8601String();
-    }
-
-    try {
-      // استخدام SalesService().getExpenses لأننا قمنا بتحديثها لتقبل التواريخ
-      // (تأكد أنك حدثتها كما اتفقنا سابقاً، وإلا استخدم الكود المباشر هنا)
-      final records = await SalesService().getExpenses(
-        startDate: startDate,
-        endDate: endDate,
-      );
-
-      double total = records.fold(
-        0.0,
-        (sum, item) => sum + (item['amount'] as num).toDouble(),
-      );
-
-      if (mounted) {
-        setState(() {
-          _expensesList = records;
-          _totalExpenses = total;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-    }
   }
 
   String _getMonthName(int month) {
@@ -188,7 +134,193 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     }
   }
 
-  // ... (نفس دالة _showManageCategoriesDialog بدون تغيير) ...
+  // ✅✅ الدالة الجديدة: نافذة موحدة للبحث والفلترة ✅✅
+  void _showSearchAndFilterSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, // عشان الكيبورد ميبوظش الشكل
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+                top: 20,
+                left: 20,
+                right: 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 50,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[400],
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // --- قسم البحث ---
+                  Text(
+                    "بحث سريع",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.grey[400] : Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: "ابحث في العنوان، التصنيف، الملاحظات...",
+                      prefixIcon: const Icon(Icons.search),
+                      filled: true,
+                      fillColor: isDark
+                          ? const Color(0xFF2C2C2C)
+                          : Colors.grey[100],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 20),
+                              onPressed: () {
+                                _searchController.clear();
+                                setSheetState(
+                                  () {},
+                                ); // تحديث حالة الشيت لمسح الزر
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (val) => setSheetState(() {}),
+                  ),
+
+                  const SizedBox(height: 25),
+                  const Divider(), // ✅ فاصل بين البحث والفلتر
+                  const SizedBox(height: 10),
+
+                  // --- قسم الفلتر (التاريخ) ---
+                  Text(
+                    "نطاق العرض",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.grey[400] : Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildFilterChip(
+                          label: "عرض شهري",
+                          isSelected: _filterType == ExpenseFilter.monthly,
+                          onTap: () => setSheetState(
+                            () => _filterType = ExpenseFilter.monthly,
+                          ),
+                          isDark: isDark,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _buildFilterChip(
+                          label: "عرض سنوي",
+                          isSelected: _filterType == ExpenseFilter.yearly,
+                          onTap: () => setSheetState(
+                            () => _filterType = ExpenseFilter.yearly,
+                          ),
+                          isDark: isDark,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // --- زر التطبيق ---
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[800],
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: () {
+                        // ✅ تطبيق التغييرات على الشاشة الرئيسية
+                        setState(() {
+                          _searchQuery = _searchController.text.trim();
+                          // الفلتر _filterType تم تحديثه بالفعل داخل الـ StatefulBuilder
+                        });
+                        Navigator.pop(context);
+                      },
+                      child: const Text(
+                        "تطبيق الفلتر والبحث",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ودجت صغيرة لأزرار الفلتر
+  Widget _buildFilterChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+    required bool isDark,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? Colors.blue.withOpacity(0.2)
+              : (isDark ? const Color(0xFF2C2C2C) : Colors.grey[100]),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? Colors.blue : Colors.transparent,
+          ),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isSelected
+                ? Colors.blue
+                : (isDark ? Colors.white : Colors.black),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- ديالوج إدارة التصنيفات ---
   void _showManageCategoriesDialog(StateSetter updateParentState) {
     if (!_canAdd) {
       ScaffoldMessenger.of(
@@ -274,7 +406,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
-  // ... (نفس دالة _showExpenseDialog بدون تغيير جوهري) ...
+  // --- ديالوج إضافة/تعديل مصروف ---
   void _showExpenseDialog({Map<String, dynamic>? expenseToEdit}) {
     if (expenseToEdit == null && !_canAdd) return;
     if (expenseToEdit != null && !_canAdd) return;
@@ -562,7 +694,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                       );
                                     }
                                     Navigator.pop(context);
-                                    // _loadData() سيتم استدعاؤها تلقائياً عبر الـ subscribe
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(
@@ -610,7 +741,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('حذف المصروف'),
-        content: const Text('هل أنت متأكد من الحذف؟'),
+        content: const Text('هل تريد نقل هذا المصروف إلى سلة المهملات؟'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -619,9 +750,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await PurchasesService().deleteExpense(id);
+              await PurchasesService().deleteExpense(
+                id,
+              ); // نقل للسلة (Soft Delete)
             },
-            child: const Text('حذف', style: TextStyle(color: Colors.red)),
+            child: const Text('نقل للسلة', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -635,31 +768,56 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ? "${_getMonthName(_selectedDate.month)} ${_selectedDate.year}"
         : "${_selectedDate.year}";
 
+    // 1. تحديد نطاق التاريخ للفلترة
+    String startDate, endDate;
+    if (_filterType == ExpenseFilter.monthly) {
+      DateTime start = DateTime(_selectedDate.year, _selectedDate.month, 1);
+      DateTime end = DateTime(
+        _selectedDate.year,
+        _selectedDate.month + 1,
+        0,
+        23,
+        59,
+        59,
+      );
+      startDate = start.toIso8601String();
+      endDate = end.toIso8601String();
+    } else {
+      DateTime start = DateTime(_selectedDate.year, 1, 1);
+      DateTime end = DateTime(_selectedDate.year, 12, 31, 23, 59, 59);
+      startDate = start.toIso8601String();
+      endDate = end.toIso8601String();
+    }
+
+    // ✅✅ 2. دمج فلتر التاريخ مع فلتر البحث في جملة واحدة للـ Stream ✅✅
+    String filterString =
+        'is_deleted = false && date >= "$startDate" && date <= "$endDate"';
+    if (_searchQuery.isNotEmpty) {
+      // البحث في العنوان أو التصنيف أو الملاحظات
+      filterString +=
+          ' && (title ~ "$_searchQuery" || category ~ "$_searchQuery" || notes ~ "$_searchQuery")';
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('إدارة المصروفات'),
         centerTitle: true,
         actions: [
-          PopupMenuButton<ExpenseFilter>(
-            icon: const Icon(Icons.filter_alt_outlined),
-            onSelected: (ExpenseFilter result) {
-              setState(() {
-                _filterType = result;
-                _selectedDate = DateTime.now();
-                _isLoading = true;
-              });
-              _loadData();
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(
-                value: ExpenseFilter.monthly,
-                child: Text('عرض شهري'),
-              ),
-              const PopupMenuItem(
-                value: ExpenseFilter.yearly,
-                child: Text('عرض سنوي'),
-              ),
-            ],
+          // ✅ الأيقونة الموحدة للبحث والفلتر
+          IconButton(
+            icon: Stack(
+              children: [
+                const Icon(Icons.manage_search, size: 28),
+                if (_searchQuery.isNotEmpty)
+                  const Positioned(
+                    right: 0,
+                    top: 0,
+                    child: CircleAvatar(radius: 4, backgroundColor: Colors.red),
+                  ),
+              ],
+            ),
+            tooltip: "بحث وتصفية",
+            onPressed: _showSearchAndFilterSheet,
           ),
         ],
         bottom: PreferredSize(
@@ -712,182 +870,212 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           ),
         ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 2000),
-                child: Column(
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      margin: const EdgeInsets.all(15),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: isDark
-                              ? [Colors.red[900]!, Colors.red[700]!]
-                              : [Colors.red[700]!, Colors.red[400]!],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(15),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.red.withOpacity(0.3),
-                            blurRadius: 10,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'إجمالي المصروفات ($filterTitle)',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            '${_totalExpenses.toStringAsFixed(2)} ج.م',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 32,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: _expensesList.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.money_off,
-                                    size: 80,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    'لا توجد مصروفات مسجلة',
-                                    style: TextStyle(color: Colors.grey[600]),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.only(
-                                left: 15,
-                                right: 15,
-                                top: 0,
-                                bottom: 100,
-                              ),
-                              itemCount: _expensesList.length,
-                              itemBuilder: (context, index) {
-                                final item = _expensesList[index];
-                                String titleToShow =
-                                    item['title'].toString().isEmpty
-                                    ? item['category']
-                                    : item['title'];
-                                bool isTitleSameAsCategory =
-                                    (item['title'].toString().isEmpty ||
-                                    item['title'] == item['category']);
-                                String datePart = item['date'].toString().split(
-                                  ' ',
-                                )[0];
-                                String subtitleText = isTitleSameAsCategory
-                                    ? datePart
-                                    : '${item['category']} • $datePart';
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        // بنطلب ستريم بالفلتر المدمج
+        stream: PBHelper().getCollectionStream(
+          'expenses',
+          filter: filterString,
+          sort: '-date',
+        ),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text("حدث خطأ: ${snapshot.error}"));
+          }
 
-                                return Card(
-                                  margin: const EdgeInsets.only(bottom: 10),
-                                  elevation: 2,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
+          final expensesList = snapshot.data ?? [];
+
+          // حساب الإجمالي
+          double totalExpenses = expensesList.fold(
+            0.0,
+            (sum, item) => sum + (item['amount'] as num).toDouble(),
+          );
+
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 2000),
+              child: Column(
+                children: [
+                  // بطاقة الإجمالي
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    margin: const EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: isDark
+                            ? [Colors.red[900]!, Colors.red[700]!]
+                            : [Colors.red[700]!, Colors.red[400]!],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(15),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withOpacity(0.3),
+                          blurRadius: 10,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          _searchQuery.isNotEmpty
+                              ? 'نتائج البحث في ($filterTitle)'
+                              : 'إجمالي المصروفات ($filterTitle)',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          '${intl.NumberFormat('#,##0.00').format(totalExpenses)} ج.م',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // قائمة المصروفات
+                  Expanded(
+                    child: expensesList.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.search_off,
+                                  size: 80,
+                                  color: Colors.grey[400],
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  _searchQuery.isNotEmpty
+                                      ? 'لا توجد نتائج للبحث'
+                                      : 'لا توجد مصروفات مسجلة',
+                                  style: TextStyle(color: Colors.grey[600]),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.only(
+                              left: 15,
+                              right: 15,
+                              top: 0,
+                              bottom: 100,
+                            ),
+                            itemCount: expensesList.length,
+                            itemBuilder: (context, index) {
+                              final item = expensesList[index];
+                              String titleToShow =
+                                  item['title'].toString().isEmpty
+                                  ? item['category']
+                                  : item['title'];
+                              bool isTitleSameAsCategory =
+                                  (item['title'].toString().isEmpty ||
+                                  item['title'] == item['category']);
+                              String datePart = item['date'].toString().split(
+                                ' ',
+                              )[0];
+                              String subtitleText = isTitleSameAsCategory
+                                  ? datePart
+                                  : '${item['category']} • $datePart';
+
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                elevation: 2,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: isDark
+                                        ? Colors.red.withOpacity(0.2)
+                                        : Colors.red[50],
+                                    child: Icon(
+                                      _getCategoryIcon(item['category']),
+                                      color: isDark
+                                          ? Colors.red[200]
+                                          : Colors.red[800],
+                                    ),
                                   ),
-                                  child: ListTile(
-                                    leading: CircleAvatar(
-                                      backgroundColor: isDark
-                                          ? Colors.red.withOpacity(0.2)
-                                          : Colors.red[50],
-                                      child: Icon(
-                                        _getCategoryIcon(item['category']),
-                                        color: isDark
-                                            ? Colors.red[200]
-                                            : Colors.red[800],
-                                      ),
+                                  title: Text(
+                                    titleToShow,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
                                     ),
-                                    title: Text(
-                                      titleToShow,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    subtitle: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(subtitleText),
-                                        if (item['notes'] != null &&
-                                            item['notes'].toString().isNotEmpty)
-                                          Text(
-                                            'ملاحظة: ${item['notes']}',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.grey[600],
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
+                                  ),
+                                  subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(subtitleText),
+                                      if (item['notes'] != null &&
+                                          item['notes'].toString().isNotEmpty)
                                         Text(
-                                          '-${item['amount']} ج.م',
+                                          'ملاحظة: ${item['notes']}',
                                           style: TextStyle(
-                                            color: Colors.red[700],
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
+                                            fontSize: 11,
+                                            color: Colors.grey[600],
                                           ),
                                         ),
-                                        const SizedBox(width: 5),
-                                        if (_canAdd)
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.edit,
-                                              color: Colors.blue,
-                                              size: 20,
-                                            ),
-                                            onPressed: () => _showExpenseDialog(
-                                              expenseToEdit: item,
-                                            ),
-                                          ),
-                                        if (_canDelete)
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete,
-                                              color: Colors.grey,
-                                              size: 20,
-                                            ),
-                                            onPressed: () =>
-                                                _deleteExpense(item['id']),
-                                          ),
-                                      ],
-                                    ),
+                                    ],
                                   ),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '-${item['amount']} ج.م',
+                                        style: TextStyle(
+                                          color: Colors.red[700],
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      if (_canAdd)
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.edit,
+                                            color: Colors.blue,
+                                            size: 20,
+                                          ),
+                                          onPressed: () => _showExpenseDialog(
+                                            expenseToEdit: item,
+                                          ),
+                                        ),
+                                      if (_canDelete)
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.delete,
+                                            color: Colors.grey,
+                                            size: 20,
+                                          ),
+                                          onPressed: () =>
+                                              _deleteExpense(item['id']),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
               ),
             ),
+          );
+        },
+      ),
       floatingActionButton: _canAdd
           ? FloatingActionButton.extended(
               onPressed: () => _showExpenseDialog(),

@@ -4,6 +4,7 @@ import 'package:al_sakr/services/sales_service.dart';
 import 'package:flutter/material.dart';
 import 'product_dialog.dart';
 import 'client_dialog.dart';
+import 'package:flutter/services.dart';
 
 /// ============================================================
 /// 🛒 شاشة المبيعات (Sales Screen) - نقطة البيع (POS)
@@ -18,8 +19,16 @@ import 'client_dialog.dart';
 /// 4. التعامل مع الصلاحيات (User Permissions) لإخفاء/إظهار الميزات.
 /// 5. تصميم متجاوب (Responsive) يعمل على الموبايل والكمبيوتر.
 class SalesScreen extends StatefulWidget {
-  const SalesScreen({super.key});
+  // ✅ 1. أضف المتغيرات دي هنا
+  final Map<String, dynamic>? oldSaleData;
+  final List<Map<String, dynamic>>? initialItems;
 
+  // ✅ 2. عدل الـ Constructor ليستقبلهم
+  const SalesScreen({
+    super.key,
+    this.oldSaleData, // ✅ المتغير الجديد
+    this.initialItems,
+  });
   @override
   State<SalesScreen> createState() => _SalesScreenState();
 }
@@ -71,6 +80,58 @@ class _SalesScreenState extends State<SalesScreen> {
     super.initState();
     // عند بدء الشاشة، نبدأ فوراً في جلب صلاحيات المستخدم
     _loadPermissions();
+
+    // ✅✅ الإضافة الجديدة: استقبال بيانات التعديل وتعبئة الشاشة ✅✅
+    // ✅✅ منطق التعبئة الذكي للتعديل ✅✅
+    if (widget.oldSaleData != null) {
+      final old = widget.oldSaleData!;
+
+      // 1. تعبئة العميل
+      _selectedClient = {'id': old['client'], 'name': old['clientName']};
+      _clientSearchController.text = old['clientName'] ?? '';
+
+      // 2. تعبئة التاريخ والرقم اليدوي
+      if (old['date'] != null) _invoiceDate = DateTime.parse(old['date']);
+      _refController.text = old['referenceNumber'] ?? '';
+
+      // 3. تعبئة نوع الدفع (كاش/آجل)
+      _isCashPayment = (old['paymentType'] == 'cash');
+
+      // 4. ✅✅ تفعيل الضرائب تلقائياً إذا كانت موجودة
+      double tax = (old['taxAmount'] ?? 0).toDouble();
+      double wht = (old['whtAmount'] ?? 0).toDouble();
+
+      _isTaxEnabled = tax > 0; // لو فيه ضريبة، علم على الزرار
+      _isWhtEnabled = wht > 0; // لو فيه خصم منبع، علم على الزرار
+
+      // تعبئة الخصم الإضافي
+      _discountController.text = (old['discount'] ?? 0).toString();
+    }
+
+    // 5. تعبئة المنتجات (كما كانت سابقاً مع إصلاح الـ ID)
+    if (widget.initialItems != null) {
+      for (var item in widget.initialItems!) {
+        String pId = '';
+        if (item['product'] is Map) {
+          pId = item['product']['id'];
+        } else if (item['expand'] != null &&
+            item['expand']['product'] != null) {
+          pId = item['expand']['product']['id'];
+        } else {
+          pId = item['product']?.toString() ?? '';
+        }
+
+        _invoiceItems.add({
+          'productId': pId,
+          'name': item['productName'] ?? 'صنف',
+          'quantity': (item['quantity'] as num).toInt(),
+          'price': (item['price'] as num).toDouble(),
+          'total': ((item['quantity'] as num) * (item['price'] as num))
+              .toDouble(),
+          'imagePath': '',
+        });
+      }
+    }
   }
 
   /// 🔐 دالة تحميل الصلاحيات (Authorization Logic)
@@ -112,8 +173,11 @@ class _SalesScreenState extends State<SalesScreen> {
   // هذه الدوال تحسب الأرقام ديناميكياً بناءً على محتوى السلة والخيارات المفعلة
 
   /// مجموع أسعار المنتجات قبل أي خصم أو ضريبة
-  double get _subTotal =>
-      _invoiceItems.fold(0.0, (sum, item) => sum + (item['total'] as double));
+  // ✅ التصحيح: استخدام (as num).toDouble()
+  double get _subTotal => _invoiceItems.fold(
+    0.0,
+    (sum, item) => sum + (item['total'] as num).toDouble(),
+  );
 
   /// قيمة الخصم المكتوبة في الحقل
   double get _discount => double.tryParse(_discountController.text) ?? 0.0;
@@ -517,6 +581,29 @@ class _SalesScreenState extends State<SalesScreen> {
     });
   }
 
+  // ✅ دالة تعديل الصنف (استرجاع البيانات للحقول وحذفه من القائمة)
+  void _editItem(int index) {
+    final item = _invoiceItems[index];
+    setState(() {
+      // 1. إرجاع البيانات لحقول الإدخال
+      _productSearchController.text = item['name'];
+      _priceController.text = item['price'].toString();
+      _qtyController.text = item['quantity'].toString();
+
+      // 2. تجهيز المتغير _selectedProduct عشان زرار الإضافة يشتغل
+      // بنعمل "محاكاة" للمنتج كأننا اخترناه من البحث
+      _selectedProduct = {
+        'id': item['productId'],
+        'name': item['name'],
+        'imagePath': item['imagePath'],
+        // مش محتاجين باقي البيانات زي المخزن في اللحظة دي
+      };
+
+      // 3. حذف الصنف من القائمة عشان يتعدل وينضاف تاني
+      _invoiceItems.removeAt(index);
+    });
+  }
+
   /// حذف صنف من القائمة
   void _removeItem(int index) {
     setState(() => _invoiceItems.removeAt(index));
@@ -524,18 +611,24 @@ class _SalesScreenState extends State<SalesScreen> {
 
   /// 💾 حفظ الفاتورة في قاعدة البيانات
   Future<void> _saveInvoice() async {
-    // 1. التحقق من الصلاحيات والبيانات الأساسية
     if (!_canAddOrder) {
       _showError('ليس لديك صلاحية لإضافة فواتير');
       return;
     }
     if (_invoiceItems.isEmpty || _selectedClient == null) {
-      _showError('البيانات ناقصة (تأكد من اختيار عميل وإضافة منتجات)');
+      _showError('البيانات ناقصة');
       return;
     }
 
     try {
-      // 2. استدعاء السيرفيس للحفظ
+      // ✅✅ التغيير الجوهري هنا:
+      // إذا كنا في وضع التعديل (يوجد oldSaleData)، نقوم بحذف الفاتورة القديمة الآن فقط
+      if (widget.oldSaleData != null) {
+        // استدعاء دالة الحذف الآمن التي أصلحناها سابقاً
+        await SalesService().deleteSaleSafe(widget.oldSaleData!['id']);
+      }
+
+      // ثم ننشئ الفاتورة الجديدة
       await SalesService().createSale(
         _selectedClient!['id'],
         _selectedClient!['name'],
@@ -548,18 +641,23 @@ class _SalesScreenState extends State<SalesScreen> {
         whtAmount: _whtAmount,
       );
 
-      // 3. نجاح الحفظ -> إظهار رسالة وتصفير الشاشة
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('تم حفظ الفاتورة بنجاح ✅'),
+            content: Text('تم الحفظ بنجاح ✅'),
             backgroundColor: Colors.green,
           ),
         );
-        _resetScreen();
+
+        // لو كنا بنعدل، نرجع للشاشة اللي فاتت عشان التحديث يظهر
+        if (widget.oldSaleData != null) {
+          Navigator.pop(context);
+        } else {
+          _resetScreen(); // لو جديد، فضي الشاشة
+        }
       }
     } catch (e) {
-      _showError('حدث خطأ أثناء الحفظ: $e');
+      _showError('حدث خطأ: $e');
     }
   }
 
@@ -625,6 +723,7 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
+  //
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -767,7 +866,15 @@ class _SalesScreenState extends State<SalesScreen> {
                                 Expanded(
                                   child: TextField(
                                     controller: _priceController,
-                                    keyboardType: TextInputType.number,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ), // لوحة أرقام بكسور
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp(r'^\d*\.?\d*'),
+                                      ), // السماح بأرقام ونقطة واحدة فقط
+                                    ],
                                     textAlign: TextAlign.center,
                                     decoration: const InputDecoration(
                                       labelText: 'سعر',
@@ -784,7 +891,12 @@ class _SalesScreenState extends State<SalesScreen> {
                                 Expanded(
                                   child: TextField(
                                     controller: _qtyController,
-                                    keyboardType: TextInputType.number,
+                                    keyboardType:
+                                        TextInputType.number, // لوحة أرقام
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter
+                                          .digitsOnly, // أرقام صحيحة فقط (بدون نقطة)
+                                    ],
                                     textAlign: TextAlign.center,
                                     decoration: const InputDecoration(
                                       labelText: 'عدد',
@@ -846,10 +958,18 @@ class _SalesScreenState extends State<SalesScreen> {
                             ),
                             const SizedBox(width: 5),
                             SizedBox(
-                              width: 80,
+                              width: 130,
                               child: TextField(
                                 controller: _priceController,
-                                keyboardType: TextInputType.number,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ), // لوحة أرقام بكسور
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(
+                                    RegExp(r'^\d*\.?\d*'),
+                                  ), // السماح بأرقام ونقطة واحدة فقط
+                                ],
                                 textAlign: TextAlign.center,
                                 decoration: const InputDecoration(
                                   labelText: 'سعر',
@@ -860,10 +980,18 @@ class _SalesScreenState extends State<SalesScreen> {
                             ),
                             const SizedBox(width: 5),
                             SizedBox(
-                              width: 70,
+                              width: 100,
                               child: TextField(
                                 controller: _qtyController,
-                                keyboardType: TextInputType.number,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ), // لوحة أرقام بكسور
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(
+                                    RegExp(r'^\d*\.?\d*'),
+                                  ), // السماح بأرقام ونقطة واحدة فقط
+                                ],
                                 textAlign: TextAlign.center,
                                 decoration: const InputDecoration(
                                   labelText: 'عدد',
@@ -927,11 +1055,19 @@ class _SalesScreenState extends State<SalesScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  "${(item['total'] as double).toStringAsFixed(1)}",
+                                  "${(item['total'] as num).toDouble().toStringAsFixed(1)}", // 👈 استخدم num ثم toDouble
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     color: accentColor,
                                   ),
+                                ), // ✅ زر التعديل الجديد
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit,
+                                    color: Colors.blue,
+                                  ),
+                                  tooltip: 'تعديل',
+                                  onPressed: () => _editItem(index),
                                 ),
                                 IconButton(
                                   icon: const Icon(
@@ -1056,7 +1192,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         const Divider(),
 
                         // --- ملخص الحسابات (أرقام فقط) ---
-                        _buildSummaryLine("المجموع الفرعي", _subTotal),
+                        _buildSummaryLine("Total Befor Add Tax", _subTotal),
                         if (_isTaxEnabled)
                           _buildSummaryLine(
                             "Value Added Tax 14%",
@@ -1221,7 +1357,14 @@ class _SalesScreenState extends State<SalesScreen> {
       height: 50,
       child: TextField(
         controller: _discountController,
-        keyboardType: TextInputType.number,
+        keyboardType: const TextInputType.numberWithOptions(
+          decimal: true,
+        ), // لوحة أرقام بكسور
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(
+            RegExp(r'^\d*\.?\d*'),
+          ), // أرقام وكسور فقط
+        ],
         textAlign: TextAlign.center,
         style: TextStyle(
           fontWeight: FontWeight.bold,

@@ -8,7 +8,7 @@ class AppConfig {
 
   // اجعل هذه القيمة true لاستخدام السيرفر الحقيقي (Production)
   // اجعلها false لاستخدام سيرفر التطوير المحلي (Development)
-  static const bool isProduction = true;
+  static const bool isProduction = false;
 
   // ============================================================
   // 🌍 1. إعدادات السيرفر الحقيقي (Online / Production)
@@ -22,7 +22,7 @@ class AppConfig {
   // ============================================================
 
   // ⚠️ هام: ضع هنا IP جهاز الكمبيوتر الخاص بك (من إعدادات الواي فاي)
-  static const String devServerIp = "192.168.1.24";
+  static const String devServerIp = "192.168.1.22";
 
   // المنفذ (Port)
   static const String devPort = "8090";

@@ -305,6 +305,7 @@ class _StoreScreenState extends State<StoreScreen> {
 
                 // الفلترة
                 final filteredList = allProducts.where((product) {
+                  if (product['is_deleted'] == true) return false;
                   final keyword = _searchController.text.toLowerCase();
                   final name = (product['name'] ?? '').toString().toLowerCase();
                   final code = (product['code'] ?? '').toString().toLowerCase();

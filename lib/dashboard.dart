@@ -1,3 +1,4 @@
+import 'package:al_sakr/trash_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:badges/badges.dart' as badges;
 import 'package:shared_preferences/shared_preferences.dart'; // ✅ 1. إضافة المكتبة
@@ -247,6 +248,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: const Text("لوحة التحكم"),
         centerTitle: false,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.delete),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (c) => const TrashScreen()),
+              ).then((_) {
+                setState(() {
+                  _unreadStream = NoticeService().getUnreadCountStream();
+                });
+              });
+            },
+          ),
           // ✅ 3. استخدام دالة التبديل الجديدة هنا
           IconButton(
             onPressed: _toggleViewMode,

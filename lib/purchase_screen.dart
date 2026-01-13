@@ -5,9 +5,14 @@ import 'services/inventory_service.dart';
 import 'services/purchases_service.dart';
 import 'product_dialog.dart';
 import 'supplier_dialog.dart';
+import 'package:flutter/services.dart';
 
 class PurchaseScreen extends StatefulWidget {
-  const PurchaseScreen({super.key});
+  // ✅ متغيرات جديدة لاستقبال بيانات التعديل
+  final Map<String, dynamic>? oldPurchaseData;
+  final List<Map<String, dynamic>>? initialItems;
+
+  const PurchaseScreen({super.key, this.oldPurchaseData, this.initialItems});
 
   @override
   State<PurchaseScreen> createState() => _PurchaseScreenState();
@@ -48,6 +53,56 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     super.initState();
     _loadPermissions();
     _loadUnits();
+
+    // ✅✅ منطق التعبئة في حالة التعديل ✅✅
+    if (widget.oldPurchaseData != null) {
+      final old = widget.oldPurchaseData!;
+
+      // تعبئة المورد
+      _selectedSupplierId = old['supplier'] ?? old['supplierId'];
+      _supplierSearchController.text = old['supplierName'] ?? '';
+
+      // تعبئة التاريخ والرقم
+      if (old['date'] != null) _invoiceDate = DateTime.parse(old['date']);
+      _refNumController.text = old['referenceNumber'] ?? '';
+
+      // تعبئة نوع الدفع
+      _isCashPayment = (old['paymentType'] == 'cash');
+
+      // تفعيل الضرائب تلقائياً
+      double tax = (old['taxAmount'] ?? 0).toDouble();
+      double wht = (old['whtAmount'] ?? 0).toDouble();
+      _isTaxEnabled = tax > 0;
+      _isWhtEnabled = wht > 0;
+
+      // تعبئة الخصم
+      _discountController.text = (old['discount'] ?? 0).toString();
+    }
+
+    // ✅✅ تعبئة الأصناف في السلة ✅✅
+    if (widget.initialItems != null) {
+      for (var item in widget.initialItems!) {
+        // التعامل مع اختلاف مسميات الـ ID
+        String pId = '';
+        if (item['product'] is Map) {
+          pId = item['product']['id'];
+        } else {
+          pId = item['product'] ?? item['productId'];
+        }
+
+        // قراءة السعر والكمية
+        double price = (item['costPrice'] ?? item['price'] as num).toDouble();
+        int qty = (item['quantity'] as num).toInt();
+
+        _cart.add({
+          'productId': pId,
+          'name': item['productName'] ?? 'صنف',
+          'quantity': qty,
+          'price': price,
+          'total': (qty * price).toDouble(),
+        });
+      }
+    }
   }
 
   Future<void> _loadPermissions() async {
@@ -91,6 +146,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     }
   }
 
+  // --- الحسابات ---
   double get _subTotal {
     double sum = 0;
     for (var item in _cart) {
@@ -105,6 +161,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
   double get _whtAmount => _isWhtEnabled ? _taxableAmount * 0.01 : 0.0;
   double get _grandTotal => _taxableAmount + _taxAmount - _whtAmount;
 
+  // --- الديالوجات ---
   Future<void> _openAddSupplierDialog() async {
     if (!_canAddSupplier) return;
     final result = await showDialog(
@@ -193,11 +250,11 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                           sort: isSupplier ? 'name' : '-created',
                         ),
                         builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
+                          if (!snapshot.hasData)
                             return const Center(
                               child: CircularProgressIndicator(),
                             );
-                          }
+
                           final allItems = snapshot.data!;
                           final filteredList = allItems.where((item) {
                             final q = query.toLowerCase();
@@ -238,7 +295,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                 const SizedBox(height: 10),
                             itemBuilder: (context, index) {
                               final item = filteredList[index];
-
                               return GestureDetector(
                                 onTap: () {
                                   setState(() {
@@ -275,7 +331,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                   ),
                                   child: Row(
                                     children: [
-                                      // الصورة
                                       Container(
                                         width: 50,
                                         height: 50,
@@ -297,8 +352,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                               ),
                                       ),
                                       const SizedBox(width: 12),
-
-                                      // التفاصيل
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment:
@@ -469,6 +522,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     });
   }
 
+  // ✅✅ دالة الحفظ المعدلة للتعامل مع التعديل ✅✅
   void _submitPurchase() async {
     if (!_canAddPurchase) {
       ScaffoldMessenger.of(
@@ -483,6 +537,14 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
       return;
     }
     try {
+      // 1. إذا كان تعديل، نحذف الفاتورة القديمة أولاً
+      if (widget.oldPurchaseData != null) {
+        await PurchasesService().deletePurchaseSafe(
+          widget.oldPurchaseData!['id'],
+        );
+      }
+
+      // 2. إنشاء الفاتورة الجديدة
       await PurchasesService().createPurchase(
         _selectedSupplierId!,
         _grandTotal,
@@ -494,6 +556,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         discount: _discount,
         paymentType: _isCashPayment ? 'cash' : 'credit',
       );
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -501,13 +564,20 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
           backgroundColor: Colors.green,
         ),
       );
-      setState(() {
-        _cart.clear();
-        _selectedSupplierId = null;
-        _supplierSearchController.clear();
-        _refNumController.clear();
-        _discountController.text = '0';
-      });
+
+      // 3. التوجيه بعد الحفظ
+      if (widget.oldPurchaseData != null) {
+        Navigator.pop(context); // العودة للسجل في حالة التعديل
+      } else {
+        // تصفير الشاشة في حالة الإضافة الجديدة
+        setState(() {
+          _cart.clear();
+          _selectedSupplierId = null;
+          _supplierSearchController.clear();
+          _refNumController.clear();
+          _discountController.text = '0';
+        });
+      }
     } catch (e) {
       ScaffoldMessenger.of(
         context,
@@ -556,8 +626,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accentColor = isDark ? Colors.brown[300]! : Colors.brown[700]!;
     final blueColor = Colors.blue[800]!;
-
-    // ✅ استخدمنا MediaQuery لتجنب خطأ الـ LayoutBuilder
     bool isWide = MediaQuery.of(context).size.width > 600;
 
     return Scaffold(
@@ -565,7 +633,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
-            // 1. الجزء العلوي
+            // 1. الجزء العلوي (البيانات)
             SliverToBoxAdapter(
               child: Card(
                 margin: const EdgeInsets.all(10),
@@ -634,9 +702,8 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                       ),
                       const SizedBox(height: 10),
 
-                      // حقول إضافة المنتج (Responsive)
+                      // حقول إضافة المنتج
                       if (!isWide)
-                        // موبايل
                         Column(
                           children: [
                             TextField(
@@ -662,7 +729,15 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                 Expanded(
                                   child: TextField(
                                     controller: _costPriceController,
-                                    keyboardType: TextInputType.number,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp(r'^\d*\.?\d*'),
+                                      ),
+                                    ],
                                     decoration: const InputDecoration(
                                       labelText: 'سعر',
                                       border: OutlineInputBorder(),
@@ -674,7 +749,14 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                 Expanded(
                                   child: TextField(
                                     controller: _qtyController,
-                                    keyboardType: TextInputType.number,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter
+                                          .digitsOnly, // أرقام صحيحة فقط
+                                    ],
                                     decoration: const InputDecoration(
                                       labelText: 'كمية',
                                       border: OutlineInputBorder(),
@@ -698,7 +780,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                           ],
                         )
                       else
-                        // كمبيوتر
                         Row(
                           children: [
                             Expanded(
@@ -726,7 +807,15 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                             Expanded(
                               child: TextField(
                                 controller: _costPriceController,
-                                keyboardType: TextInputType.number,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(
+                                    RegExp(r'^\d*\.?\d*'),
+                                  ),
+                                ],
                                 decoration: const InputDecoration(
                                   labelText: 'سعر',
                                   border: OutlineInputBorder(),
@@ -739,6 +828,10 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                               child: TextField(
                                 controller: _qtyController,
                                 keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter
+                                      .digitsOnly, // أرقام صحيحة فقط
+                                ],
                                 decoration: const InputDecoration(
                                   labelText: 'كمية',
                                   border: OutlineInputBorder(),
@@ -801,6 +894,13 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                   fontWeight: FontWeight.bold,
                                   color: accentColor,
                                 ),
+                              ), // ✅ زر التعديل الجديد
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.edit,
+                                  color: Colors.blue,
+                                ),
+                                onPressed: () => _editItem(i),
                               ),
                               IconButton(
                                 icon: const Icon(
@@ -821,7 +921,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
             // 3. الجزء السفلي (لوحة التحكم)
             SliverFillRemaining(
               hasScrollBody: false,
-              // ... داخل SliverFillRemaining ...
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -844,9 +943,8 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // ✅ لوحة التحكم (التعديل هنا)
+                        // لوحة التحكم (متجاوبة)
                         if (!isWide)
-                          // --- تصميم الموبايل (زي ما هو، عاجبك) ---
                           Column(
                             children: [
                               _buildSegmentedPaymentToggle(isDark),
@@ -855,7 +953,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                 children: [
                                   Expanded(child: _buildDiscountField(isDark)),
                                   const SizedBox(width: 10),
-                                  // الضرائب جنب بعض وزرار الخصم جنبهم
                                   Expanded(
                                     child: _buildTaxToggle(
                                       "14%",
@@ -878,28 +975,19 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                             ],
                           )
                         else
-                          // --- تصميم الكمبيوتر (التعديل الجديد) ---
                           Row(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.center, // محاذاة في المنتصف
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              // 1. زر الدفع (صغرنا المساحة شوية لـ Flex 2)
                               Expanded(
                                 flex: 2,
                                 child: _buildSegmentedPaymentToggle(isDark),
                               ),
-
                               const SizedBox(width: 15),
-
-                              // 2. حقل الخصم (Flex 2)
                               Expanded(
                                 flex: 2,
                                 child: _buildDiscountField(isDark),
                               ),
-
                               const SizedBox(width: 15),
-
-                              // 3. الضرائب (Flex 3) - خليناها جنب بعض في سطر واحد
                               Expanded(
                                 flex: 3,
                                 child: Row(
@@ -934,17 +1022,16 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                         const SizedBox(height: 20),
                         const Divider(),
 
-                        // ... باقي الكود (الملخص وزر الحفظ) زي ما هو ...
-                        _buildSummaryLine("المجموع الفرعي", _subTotal),
+                        _buildSummaryLine("Total Befor Add Tax", _subTotal),
                         if (_isTaxEnabled)
                           _buildSummaryLine(
-                            "ضريبة القيمة المضافة (14%)",
+                            "Value Added Tax 14%",
                             _taxAmount,
                             color: Colors.orange,
                           ),
                         if (_isWhtEnabled)
                           _buildSummaryLine(
-                            "خصم ضريبة المنبع (1%)",
+                            "discount tax 1%",
                             _whtAmount,
                             color: Colors.red,
                           ),
@@ -1043,9 +1130,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                 decoration: BoxDecoration(
                   color: _isCashPayment ? Colors.green : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
-                  boxShadow: _isCashPayment
-                      ? [const BoxShadow(color: Colors.black12, blurRadius: 4)]
-                      : [],
                 ),
                 alignment: Alignment.center,
                 child: Text(
@@ -1070,9 +1154,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                       ? Colors.redAccent
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
-                  boxShadow: !_isCashPayment
-                      ? [const BoxShadow(color: Colors.black12, blurRadius: 4)]
-                      : [],
                 ),
                 alignment: Alignment.center,
                 child: Text(
@@ -1097,7 +1178,10 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
       height: 50,
       child: TextField(
         controller: _discountController,
-        keyboardType: TextInputType.number,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+        ],
         textAlign: TextAlign.center,
         style: TextStyle(
           fontWeight: FontWeight.bold,
@@ -1121,6 +1205,24 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         onChanged: (val) => setState(() {}),
       ),
     );
+  }
+
+  // ✅ دالة تعديل الصنف للمشتريات
+  void _editItem(int index) {
+    final item = _cart[index];
+    setState(() {
+      // 1. إرجاع البيانات للحقول
+      _productSearchController.text = item['name'];
+      _costPriceController.text = item['price']
+          .toString(); // لاحظ: هنا بنستخدم costPrice
+      _qtyController.text = item['quantity'].toString();
+
+      // 2. تحديد الايدي عشان الحفظ يشتغل
+      _selectedProductId = item['productId'];
+
+      // 3. حذف من القائمة
+      _cart.removeAt(index);
+    });
   }
 
   Widget _buildTaxToggle(
@@ -1182,9 +1284,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
 class ScrollingText extends StatefulWidget {
   final String text;
   final TextStyle? style;
-
   const ScrollingText({required this.text, this.style, super.key});
-
   @override
   State<ScrollingText> createState() => _ScrollingTextState();
 }
@@ -1203,7 +1303,6 @@ class _ScrollingTextState extends State<ScrollingText>
       vsync: this,
       duration: const Duration(seconds: 4),
     );
-
     WidgetsBinding.instance.addPostFrameCallback((_) => _startScrolling());
   }
 
@@ -1218,13 +1317,10 @@ class _ScrollingTextState extends State<ScrollingText>
           ).animate(
             CurvedAnimation(parent: _animationController, curve: Curves.linear),
           );
-
       _animation.addListener(() {
-        if (_scrollController.hasClients) {
+        if (_scrollController.hasClients)
           _scrollController.jumpTo(_animation.value);
-        }
       });
-
       _animationController.repeat(reverse: true);
     }
   }

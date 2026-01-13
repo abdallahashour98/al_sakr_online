@@ -157,6 +157,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
 
           final allClients = snapshot.data!;
           final filteredClients = allClients.where((c) {
+            if (c['is_deleted'] == true) return false;
             final name = c['name'].toString().toLowerCase();
             final phone = (c['phone'] ?? '').toString();
             final q = _searchQuery.toLowerCase();
