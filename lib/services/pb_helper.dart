@@ -42,7 +42,7 @@ class PBHelper {
 
     // أندرويد
     const AndroidInitializationSettings androidSettings =
-        AndroidInitializationSettings('notification_icon');
+        AndroidInitializationSettings('ic_notification');
 
     // لينكس
     final LinuxInitializationSettings linuxSettings =
@@ -50,12 +50,13 @@ class PBHelper {
 
     // ✅ ويندوز (الإضافة الجديدة لحل المشكلة)
     // ✅ ويندوز (تمت إضافة المعرفات الإجبارية للإصدار الجديد)
+    // ✅ ويندوز
     final WindowsInitializationSettings windowsSettings =
         WindowsInitializationSettings(
           appName: 'Al Sakr',
-          appUserModelId: 'com.alsakr.app', // معرف فريد للتطبيق
-          guid:
-              '81a17932-d603-4f24-9b24-94f712431692', // معرف GUID عشوائي وفريد
+          // ⚠️ تم التعديل هنا ليطابق الموجود في pubspec.yaml
+          appUserModelId: 'com.alsakr.accounting',
+          guid: '81a17932-d603-4f24-9b24-94f712431692',
         );
 
     // تجميع الإعدادات
@@ -193,12 +194,16 @@ class PBHelper {
           importance: Importance.max,
           priority: Priority.high,
           playSound: true,
+          icon: 'notification_icon', // 👈 تأكد من تحديث الاسم هنا أيضاً
         );
 
+    const LinuxNotificationDetails linuxDetails = LinuxNotificationDetails(
+      urgency: LinuxNotificationUrgency.critical,
+    );
     const NotificationDetails details = NotificationDetails(
       android: androidDetails,
+      linux: linuxDetails, // 👈 تمت الإضافة
     );
-
     final notificationId = id ?? DateTime.now().millisecondsSinceEpoch % 100000;
 
     await _notificationsPlugin.show(

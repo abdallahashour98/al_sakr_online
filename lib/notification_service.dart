@@ -5,42 +5,39 @@ class NotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
-  // ✅ دالة التهيئة المحدثة
-  // تقبل دالة (onNotificationTap) لتحديد ماذا يحدث عند الضغط (اختياري)
-  // وتقبل (requestPermission) لتحديد هل نطلب الإذن أم لا (للخلفية نرسل false)
+  // تعريف القناة كثابت لاستخدامه في كل مكان
+  static const AndroidNotificationChannel announcementChannel =
+      AndroidNotificationChannel(
+        'announcements_channel', // ID
+        'تنبيهات الإدارة', // Name
+        description: 'قناة التنبيهات الإدارية',
+        importance: Importance.max,
+        playSound: true,
+      );
+
   static Future<void> init({
     bool requestPermission = false,
     Function(NotificationResponse)? onNotificationTap,
   }) async {
     // 1. إعدادات الأندرويد
     const AndroidInitializationSettings androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('ic_notification');
 
     // 2. إعدادات اللينكس
     final LinuxInitializationSettings linuxSettings =
         LinuxInitializationSettings(defaultActionName: 'Open notification');
 
-    // تجميع الإعدادات
     final InitializationSettings initSettings = InitializationSettings(
       android: androidSettings,
       linux: linuxSettings,
     );
 
-    // تهيئة البلاجن
     await _notificationsPlugin.initialize(
       initSettings,
-      // نربط دالة الضغط هنا (ستكون null في الخلفية لتجنب الكراش)
       onDidReceiveNotificationResponse: onNotificationTap,
     );
 
-    // طلب الإذن فقط إذا طلبنا ذلك (في الواجهة)
-    if (requestPermission) {
-      await _requestPermissions();
-    }
-  }
-
-  // دالة طلب الأذونات (للأندرويد 13+)
-  static Future<void> _requestPermissions() async {
+    // ✅ إنشاء القناة فوراً عند التهيئة
     if (Platform.isAndroid) {
       final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
           _notificationsPlugin
@@ -48,7 +45,13 @@ class NotificationService {
                 AndroidFlutterLocalNotificationsPlugin
               >();
 
-      await androidImplementation?.requestNotificationsPermission();
+      await androidImplementation?.createNotificationChannel(
+        announcementChannel,
+      );
+
+      if (requestPermission) {
+        await androidImplementation?.requestNotificationsPermission();
+      }
     }
   }
 

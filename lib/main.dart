@@ -43,13 +43,12 @@ void main() {
       localeNotifier.value = savedLocale;
 
       try {
-        if (Platform.isAndroid) await Permission.notification.request();
-
-        // 1. تهيئة خدمة الإشعارات مع دالة التوجيه
         await NotificationService.init(
-          requestPermission: true,
+          requestPermission: true, // نطلب الصلاحية هنا
           onNotificationTap: onNotificationTap,
         );
+
+        if (Platform.isAndroid) await Permission.notification.request();
 
         // 2. تهيئة PBHelper وتمرير دالة التوجيه أيضاً لضمان عدم مسحها
         await PBHelper.init(onNotificationTap: onNotificationTap);

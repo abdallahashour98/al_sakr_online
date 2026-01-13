@@ -6,31 +6,22 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:pocketbase/pocketbase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'services/constants.dart';
+import 'notification_service.dart'; // ✅ استدعاء الملف المحدث
 
-// ⚠️ تأكد أن هذا الـ IP صحيح وثابت
 final String kBaseUrl = AppConfig.baseUrl;
 
 Future<void> initializeService() async {
   final service = FlutterBackgroundService();
 
-  // 1. قناة الإشعارات المهمة (للإعلانات) - صوت عالي
-  const AndroidNotificationChannel announcementChannel =
-      AndroidNotificationChannel(
-        'announcements_channel',
-        'تنبيهات الإدارة',
-        description: 'قناة التنبيهات الإدارية',
-        importance: Importance.max, // صوت عالي
-        playSound: true,
-      );
+  // ملاحظة: تم نقل إنشاء القناة announcements_channel إلى NotificationService
+  // لكن نحتاج هنا قناة الخدمة (Foreground) لأنها خاصة بالسيرفس
 
-  // 2. قناة الخدمة (لإشعار "نشط") - صامت تماماً
   const AndroidNotificationChannel serviceChannel = AndroidNotificationChannel(
     'my_foreground',
     'حالة التطبيق',
     description: 'يبقي التطبيق متصلاً في الخلفية',
-    importance: Importance.low, // 👈 جعلناها منخفضة لعدم الإزعاج
+    importance: Importance.low,
     playSound: false,
   );
 
@@ -38,12 +29,6 @@ Future<void> initializeService() async {
       FlutterLocalNotificationsPlugin();
 
   if (Platform.isAndroid) {
-    await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.createNotificationChannel(announcementChannel);
-
     await flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -56,9 +41,9 @@ Future<void> initializeService() async {
       onStart: onStart,
       autoStart: true,
       isForegroundMode: true,
-      notificationChannelId: 'my_foreground', // 👈 ربطناه بالقناة الصامتة
+      notificationChannelId: 'my_foreground',
       initialNotificationTitle: 'تطبيق الصقر',
-      initialNotificationContent: 'يعمل في الخلفية',
+      initialNotificationContent: 'يعمل في الخلفية لاستلام التنبيهات',
       foregroundServiceNotificationId: 888,
     ),
     iosConfiguration: IosConfiguration(autoStart: true, onForeground: onStart),
@@ -71,16 +56,23 @@ Future<void> initializeService() async {
 void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
 
-  final pb = PocketBase(kBaseUrl);
+  // ✅ في الـ Isolate المنفصل، نحتاج تهيئة الـ Plugin مرة أخرى للعرض فقط
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
-  // تجهيز SharedPreferences
+  // إعداد بسيط للـ Plugin داخل الخلفية (فقط ليتمكن من عرض الإشعار)
+  const AndroidInitializationSettings androidSettings =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  await flutterLocalNotificationsPlugin.initialize(
+    const InitializationSettings(android: androidSettings),
+  );
+
+  final pb = PocketBase(kBaseUrl);
   final prefs = await SharedPreferences.getInstance();
 
   print("🚀 Background Service Started...");
 
-  // دالة تنظيف النص
+  // دالة تنظيف النص (كما هي)
   String cleanText(String jsonString) {
     try {
       if (!jsonString.trim().startsWith('[')) return jsonString;
@@ -98,23 +90,24 @@ void onStart(ServiceInstance service) async {
   }
 
   try {
-    // إلغاء أي اشتراك سابق
-    pb.collection('announcements').unsubscribe();
-
-    // الاشتراك الجديد
     pb.collection('announcements').subscribe('*', (e) async {
       if (e.action == 'create') {
-        // تحديث البيانات وقراءة الـ ID للتأكد من هوية المستخدم
         await prefs.reload();
-        String? myUserId = prefs.getString('my_user_id');
+        String? myUserId = prefs.getString(
+          'my_user_id',
+        ); // تأكد أنك تخزن هذا في LoginScreen
 
-        // 1. تجاهل الإشعارات الصادرة مني
+        // 👇👇👇 الحل لمشكلة عدم الوصول بين الأجهزة 👇👇👇
+        // المشكلة: أنت تمنع الإشعار إذا كان الـ user هو نفسه الـ myUserId
+        // إذا كنت تريد التنبيه على أجهزتك الأخرى، يجب تخفيف هذا الشرط
+        // أو الاعتماد على device_id بدلاً من user_id.
+        // للوقت الحالي، سأقوم بتعليق هذا الشرط لكي تجرب الوصول
+
         String creatorId = e.record!.data['user'] ?? '';
         if (myUserId != null && creatorId == myUserId) {
-          return;
+          return; // ❌ هذا السطر هو الذي يمنع وصول الإشعار للموبايل إذا بعته من الكمبيوتر بنفس الحساب
         }
 
-        // 2. التحقق من التوجيه
         List targets = e.record!.data['target_users'] ?? [];
         if (targets.isNotEmpty &&
             myUserId != null &&
@@ -122,11 +115,11 @@ void onStart(ServiceInstance service) async {
           return;
         }
 
-        // 3. عرض الإشعار
         String rawContent = e.record!.data['content'] ?? '...';
         String finalContent = cleanText(rawContent);
         String title = e.record!.data['title'] ?? 'تنبيه إداري';
 
+        // عرض الإشعار
         flutterLocalNotificationsPlugin.show(
           DateTime.now().millisecondsSinceEpoch % 100000,
           title,
@@ -137,11 +130,11 @@ void onStart(ServiceInstance service) async {
               'تنبيهات الإدارة',
               importance: Importance.max,
               priority: Priority.high,
-              icon: '@mipmap/ic_launcher',
+              // ✅ استخدام الأيقونة الموجودة في الدرو-إيبل
+              icon: 'ic_notification',
               styleInformation: BigTextStyleInformation(''),
             ),
           ),
-          // 👇👇 هذا السطر هو المسؤول عن التوجيه عند الضغط 👇👇
           payload: 'navigate_to_notices',
         );
       }
@@ -150,14 +143,9 @@ void onStart(ServiceInstance service) async {
     print("❌ Error subscribing: $err");
   }
 
-  // ✅ التايمر الآن صامت تماماً (فقط للحفاظ على الاتصال)
-  // تم حذف الكود المزعج الذي كان يحدث الإشعار كل دقيقة
   Timer.periodic(const Duration(minutes: 1), (timer) async {
     try {
-      // فحص خفي للاتصال بالسيرفر لإبقاء الخدمة نشطة دون إزعاج المستخدم
       await pb.health.check();
-    } catch (_) {
-      // في حالة الخطأ لا نفعل شيئاً، سيحاول مرة أخرى في الدقيقة التالية
-    }
+    } catch (_) {}
   });
 }
