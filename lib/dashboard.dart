@@ -484,4 +484,6 @@ class DashboardCard extends StatelessWidget {
       ),
     );
   }
+
+  //
 }
