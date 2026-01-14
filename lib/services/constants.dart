@@ -8,7 +8,7 @@ class AppConfig {
 
   // اجعل هذه القيمة true لاستخدام السيرفر الحقيقي (Production)
   // اجعلها false لاستخدام سيرفر التطوير المحلي (Development)
-  static const bool isProduction = false;
+  static const bool isProduction = true;
 
   // ============================================================
   // 🌍 1. إعدادات السيرفر الحقيقي (Online / Production)
