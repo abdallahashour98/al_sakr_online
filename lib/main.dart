@@ -148,7 +148,6 @@ class _ConnectionCheckWrapperState extends State<ConnectionCheckWrapper> {
         // ✅ هام جداً: عند إعادة التهيئة، نمرر دالة التوجيه مرة أخرى
         // لكي لا يتم استبدالها بـ null ويتوقف التوجيه عن العمل
         await PBHelper.init(onNotificationTap: onNotificationTap);
-
         // فحص هل تم فتح التطبيق من إشعار (والتطبيق مغلق تماماً)
         bool launchedFromNotification = false;
         if (Platform.isAndroid || Platform.isIOS) {

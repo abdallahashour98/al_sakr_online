@@ -4,7 +4,7 @@ import 'dart:math';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:pocketbase/pocketbase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'constants.dart'; // ✅ استدعاء ملف الثوابت
+import 'constants.dart';
 
 class PBHelper {
   // Singleton Pattern
@@ -14,9 +14,11 @@ class PBHelper {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
-  // ✅ نستخدم late، وسيتم تهيئته في دالة init
-  // late PocketBase pb;
+  // متغير لتتبع حالة التهيئة (الإصلاح رقم 1)
+  static bool _isInitialized = false;
+
   PocketBase pb = PocketBase(AppConfig.baseUrl);
+
   // Constructor خاص
   PBHelper._internal();
 
@@ -27,6 +29,11 @@ class PBHelper {
     bool requestPermission = false,
     Function(NotificationResponse)? onNotificationTap,
   }) async {
+    // ✅ الإصلاح رقم 1: منع التكرار
+    if (_isInitialized) {
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
 
     // 1. إعداد مخزن المصادقة
@@ -38,32 +45,26 @@ class PBHelper {
     // 2. تهيئة PocketBase
     PBHelper().pb = PocketBase(AppConfig.baseUrl, authStore: store);
 
-    // 3. إعدادات الإشعارات (Notifications)
+    // 3. إعدادات الإشعارات
 
-    // أندرويد
+    // ✅ الإصلاح رقم 2: توحيد اسم الأيقونة (تأكد أن الصورة موجودة في drawable)
     const AndroidInitializationSettings androidSettings =
-        AndroidInitializationSettings('ic_notification');
+        AndroidInitializationSettings('notification_icon');
 
-    // لينكس
     final LinuxInitializationSettings linuxSettings =
         LinuxInitializationSettings(defaultActionName: 'Open notification');
 
-    // ✅ ويندوز (الإضافة الجديدة لحل المشكلة)
-    // ✅ ويندوز (تمت إضافة المعرفات الإجبارية للإصدار الجديد)
-    // ✅ ويندوز
     final WindowsInitializationSettings windowsSettings =
         WindowsInitializationSettings(
           appName: 'Al Sakr',
-          // ⚠️ تم التعديل هنا ليطابق الموجود في pubspec.yaml
           appUserModelId: 'com.alsakr.accounting',
           guid: '81a17932-d603-4f24-9b24-94f712431692',
         );
 
-    // تجميع الإعدادات
     final InitializationSettings initSettings = InitializationSettings(
       android: androidSettings,
       linux: linuxSettings,
-      windows: windowsSettings, // 👈 لازم تمرر المتغير ده هنا
+      windows: windowsSettings,
     );
 
     await _notificationsPlugin.initialize(
@@ -71,29 +72,30 @@ class PBHelper {
       onDidReceiveNotificationResponse: onNotificationTap,
     );
 
-    // طلب الصلاحيات (للأندرويد فقط)
-    if (requestPermission) {
-      if (Platform.isAndroid) {
-        await _notificationsPlugin
-            .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin
-            >()
-            ?.requestNotificationsPermission();
-      }
+    // طلب الصلاحيات
+    if (requestPermission && Platform.isAndroid) {
+      await _notificationsPlugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.requestNotificationsPermission();
     }
-  } // ============================================================
+
+    // ✅ وضع علامة أن التهيئة تمت
+    _isInitialized = true;
+  }
+
+  // ============================================================
   // 🖼️ 2. دوال مساعدة عامة (Helpers)
   // ============================================================
 
   bool get isLoggedIn => pb.authStore.isValid;
 
-  // جلب رابط الصورة
   String getImageUrl(String collectionId, String recordId, String filename) {
     if (filename.isEmpty) return '';
     return '${AppConfig.baseUrl}/api/files/$collectionId/$recordId/$filename';
   }
 
-  // تحويل السجل لـ Map (دالة ثابتة ومهمة جداً)
   static Map<String, dynamic> recordToMap(RecordModel record) {
     var data = Map<String, dynamic>.from(record.data);
     data['id'] = record.id;
@@ -101,7 +103,6 @@ class PBHelper {
     data['created'] = record.created;
     data['updated'] = record.updated;
 
-    // فك بيانات العلاقات (Expand)
     if (record.expand.isNotEmpty) {
       if (record.expand.containsKey('supplier')) {
         data['supplierName'] = record.expand['supplier']?.first.data['name'];
@@ -112,11 +113,9 @@ class PBHelper {
       if (record.expand.containsKey('product')) {
         data['productName'] = record.expand['product']?.first.data['name'];
       }
-      // للمستخدمين (في الإشعارات أو غيره)
       if (record.expand.containsKey('user')) {
         data['userName'] = record.expand['user']?.first.data['name'];
       }
-      // للمشاهدين (seen_by)
       if (record.expand.containsKey('seen_by')) {
         final users = record.expand['seen_by'];
         if (users != null && users.isNotEmpty) {
@@ -128,7 +127,7 @@ class PBHelper {
   }
 
   // ============================================================
-  // ⚡ 3. البيانات الحية (Real-time Stream)
+  // ⚡ 3. البيانات الحية (Real-time Stream) - النسخة المحسنة
   // ============================================================
   Stream<List<Map<String, dynamic>>> getCollectionStream(
     String collectionName, {
@@ -138,11 +137,14 @@ class PBHelper {
   }) {
     final controller = StreamController<List<Map<String, dynamic>>>.broadcast();
 
+    // دالة لجلب البيانات
     Future<void> fetchData() async {
       try {
+        if (controller.isClosed) return;
         final records = await pb
             .collection(collectionName)
             .getFullList(sort: sort, expand: expand, filter: filter);
+
         if (!controller.isClosed) {
           final data = records.map((r) => recordToMap(r)).toList();
           controller.add(data);
@@ -155,22 +157,33 @@ class PBHelper {
     // 1. جلب البيانات فوراً
     fetchData();
 
-    // 2. الاشتراك في التغييرات
-    Future.delayed(Duration.zero, () async {
-      try {
-        await pb.collection(collectionName).subscribe('*', (e) {
-          if (!controller.isClosed) {
-            fetchData(); // تحديث عند أي تغيير
-          }
-        });
-      } catch (e) {
-        print("⚠️ Realtime error ($collectionName): $e");
-      }
-    });
+    // 2. الاشتراك في التغييرات (النسخة الآمنة)
+    // ✅ الإصلاح رقم 3: استخدام UnsubscribeFunc لعدم فصل باقي الشاشات
+    UnsubscribeFunc? unsubscribeFunc;
 
-    controller.onCancel = () {
+    pb
+        .collection(collectionName)
+        .subscribe('*', (e) {
+          if (!controller.isClosed) {
+            fetchData();
+          }
+        })
+        .then((func) {
+          unsubscribeFunc = func;
+        })
+        .catchError((e) {
+          print("⚠️ Realtime error ($collectionName): $e");
+        });
+
+    controller.onCancel = () async {
       try {
-        pb.collection(collectionName).unsubscribe('*');
+        // نستخدم دالة الإلغاء الخاصة بهذا الاشتراك فقط
+        if (unsubscribeFunc != null) {
+          await unsubscribeFunc!();
+        } else {
+          // كحل بديل فقط لو فشل الاشتراك الأول
+          // await pb.collection(collectionName).unsubscribe('*');
+        }
       } catch (_) {}
       controller.close();
     };
@@ -194,7 +207,8 @@ class PBHelper {
           importance: Importance.max,
           priority: Priority.high,
           playSound: true,
-          icon: 'notification_icon', // 👈 تأكد من تحديث الاسم هنا أيضاً
+          // ✅ تم التأكد من توحيد الاسم هنا (notification_icon)
+          icon: 'notification_icon',
         );
 
     const LinuxNotificationDetails linuxDetails = LinuxNotificationDetails(
@@ -202,7 +216,7 @@ class PBHelper {
     );
     const NotificationDetails details = NotificationDetails(
       android: androidDetails,
-      linux: linuxDetails, // 👈 تمت الإضافة
+      linux: linuxDetails,
     );
     final notificationId = id ?? DateTime.now().millisecondsSinceEpoch % 100000;
 
@@ -218,7 +232,6 @@ class PBHelper {
   // ============================================================
   // 🆔 5. أدوات مساعدة (Utils)
   // ============================================================
-  // توليد ID عشوائي (للـ Batch operations)
   static String generateId() {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     final rnd = Random();
