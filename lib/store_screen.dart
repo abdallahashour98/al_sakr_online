@@ -1,3 +1,5 @@
+// lib/store_screen.dart
+
 import 'dart:io';
 import 'package:al_sakr/services/inventory_service.dart';
 import 'package:al_sakr/services/pb_helper.dart';
@@ -16,6 +18,9 @@ class _StoreScreenState extends State<StoreScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _filterType = 'all';
 
+  // ✅ 1. تعريف متغير الستريم خارج الـ build
+  late Stream<List<Map<String, dynamic>>> _productsStream;
+
   // متغيرات الصلاحيات
   bool _canAdd = false;
   bool _canEdit = false;
@@ -27,6 +32,14 @@ class _StoreScreenState extends State<StoreScreen> {
   void initState() {
     super.initState();
     _loadPermissions();
+
+    // ✅ 2. تهيئة الستريم مرة واحدة عند فتح الشاشة
+    // هذا يمنع إعادة الاتصال مع كل scroll أو تحديث بسيط
+    _productsStream = PBHelper().getCollectionStream(
+      'products',
+      sort: '-created',
+      expand: 'supplier',
+    );
   }
 
   Future<void> _loadPermissions() async {
@@ -240,6 +253,8 @@ class _StoreScreenState extends State<StoreScreen> {
                 Expanded(
                   child: TextField(
                     controller: _searchController,
+                    // ✅ عند الكتابة، نقوم فقط بعمل setState لإعادة بناء الـ UI بالفلتر الجديد
+                    // دون إعادة طلب الستريم من السيرفر
                     onChanged: (val) => setState(() {}),
                     decoration: InputDecoration(
                       labelText: 'بحث (اسم، كود، باركود)...',
@@ -288,11 +303,8 @@ class _StoreScreenState extends State<StoreScreen> {
           // القائمة
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: PBHelper().getCollectionStream(
-                'products',
-                sort: '-created',
-                expand: 'supplier',
-              ),
+              // ✅ 3. استخدام المتغير الثابت بدلاً من دالة الإنشاء المباشر
+              stream: _productsStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -303,7 +315,7 @@ class _StoreScreenState extends State<StoreScreen> {
 
                 final allProducts = snapshot.data ?? [];
 
-                // الفلترة
+                // ✅ الفلترة تتم محلياً هنا
                 final filteredList = allProducts.where((product) {
                   if (product['is_deleted'] == true) return false;
                   final keyword = _searchController.text.toLowerCase();
@@ -374,7 +386,7 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
-  // ✅✅ الدالة المعدلة جذرياً لحل مشكلة الاوفر فلو ✅✅
+  // ✅ الدالة المعدلة لعرض الكارت (تم إضافة تحسين الصور)
   Widget _buildProductCard(Map<String, dynamic> product, bool isDark) {
     int stock = (product['stock'] as num).toInt();
     int reorder = (product['reorderLevel'] as num?)?.toInt() ?? 0;
@@ -404,13 +416,20 @@ class _StoreScreenState extends State<StoreScreen> {
     if (product['imagePath'] != null &&
         product['imagePath'].toString().isNotEmpty) {
       if (product['imagePath'].toString().startsWith('http')) {
-        listImageProvider = NetworkImage(product['imagePath']);
+        // ✅ 4. تطبيق الكاش لتقليل استهلاك الذاكرة
+        listImageProvider = ResizeImage(
+          NetworkImage(product['imagePath']),
+          width: 150, // تصغير حجم الصورة في الذاكرة
+          policy: ResizeImagePolicy.fit,
+        );
       } else {
-        listImageProvider = FileImage(File(product['imagePath']));
+        listImageProvider = ResizeImage(
+          FileImage(File(product['imagePath'])),
+          width: 150,
+        );
       }
     }
 
-    // ✅ التصميم الجديد: Custom Card بدلاً من ListTile
     return Card(
       color: cardColor ?? (isDark ? const Color(0xFF2C2C2C) : Colors.white),
       elevation: 2,
@@ -477,7 +496,7 @@ class _StoreScreenState extends State<StoreScreen> {
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
                               ),
-                              maxLines: 2, // يسمح بسطرين
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -505,7 +524,7 @@ class _StoreScreenState extends State<StoreScreen> {
                       ),
                       const SizedBox(height: 8),
 
-                      // السعر والمخزون (باستخدام Wrap لتجنب الاوفر فلو)
+                      // السعر والمخزون
                       Wrap(
                         spacing: 15,
                         runSpacing: 5,
@@ -577,10 +596,10 @@ class _StoreScreenState extends State<StoreScreen> {
             ),
 
             const SizedBox(height: 12),
-            const Divider(height: 1), // فاصل خفيف
+            const Divider(height: 1),
             // 2. الصف السفلي: أزرار الإجراءات
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround, // توزيع متساوي
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildActionButton(
                   icon: Icons.history,
@@ -615,7 +634,6 @@ class _StoreScreenState extends State<StoreScreen> {
     );
   }
 
-  // ودجت صغيرة للأزرار السفلية
   Widget _buildActionButton({
     required IconData icon,
     required String label,

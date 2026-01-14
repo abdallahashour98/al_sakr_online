@@ -22,7 +22,7 @@ class AppConfig {
   // ============================================================
 
   // ⚠️ هام: ضع هنا IP جهاز الكمبيوتر الخاص بك (من إعدادات الواي فاي)
-  static const String devServerIp = "192.168.1.22";
+  static const String devServerIp = "192.168.1.12";
 
   // المنفذ (Port)
   static const String devPort = "8090";

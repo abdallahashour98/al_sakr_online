@@ -19,9 +19,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   // متغيرات الفلتر والبحث
   ExpenseFilter _filterType = ExpenseFilter.monthly;
   DateTime _selectedDate = DateTime.now();
-  String _searchQuery = ""; // ✅ متغير البحث الجديد
-  final TextEditingController _searchController =
-      TextEditingController(); // ✅ كنترولر البحث
+  String _searchQuery = "";
+  final TextEditingController _searchController = TextEditingController();
+
+  // ✅ متغير الستريم الجديد
+  late Stream<List<Map<String, dynamic>>> _expensesStream;
 
   // متغيرات الصلاحيات
   bool _canAdd = false;
@@ -46,6 +48,49 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   void initState() {
     super.initState();
     _loadPermissions();
+    _updateStream(); // ✅ تهيئة الستريم لأول مرة
+  }
+
+  // ✅ دالة تحديث الستريم (تُستدعى عند تغيير التاريخ أو البحث)
+  void _updateStream() {
+    String filterTitle = _filterType == ExpenseFilter.monthly
+        ? "${_getMonthName(_selectedDate.month)} ${_selectedDate.year}"
+        : "${_selectedDate.year}";
+
+    String startDate, endDate;
+    if (_filterType == ExpenseFilter.monthly) {
+      DateTime start = DateTime(_selectedDate.year, _selectedDate.month, 1);
+      DateTime end = DateTime(
+        _selectedDate.year,
+        _selectedDate.month + 1,
+        0,
+        23,
+        59,
+        59,
+      );
+      startDate = start.toIso8601String();
+      endDate = end.toIso8601String();
+    } else {
+      DateTime start = DateTime(_selectedDate.year, 1, 1);
+      DateTime end = DateTime(_selectedDate.year, 12, 31, 23, 59, 59);
+      startDate = start.toIso8601String();
+      endDate = end.toIso8601String();
+    }
+
+    String filterString =
+        'is_deleted = false && date >= "$startDate" && date <= "$endDate"';
+    if (_searchQuery.isNotEmpty) {
+      filterString +=
+          ' && (title ~ "$_searchQuery" || category ~ "$_searchQuery" || notes ~ "$_searchQuery")';
+    }
+
+    setState(() {
+      _expensesStream = PBHelper().getCollectionStream(
+        'expenses',
+        filter: filterString,
+        sort: '-date',
+      );
+    });
   }
 
   Future<void> _loadPermissions() async {
@@ -89,6 +134,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         _selectedDate = DateTime(_selectedDate.year + offset, 1, 1);
       }
     });
+    _updateStream(); // ✅ تحديث الستريم عند تغيير التاريخ
   }
 
   String _getMonthName(int month) {
@@ -134,13 +180,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     }
   }
 
-  // ✅✅ الدالة الجديدة: نافذة موحدة للبحث والفلترة ✅✅
   void _showSearchAndFilterSheet() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // عشان الكيبورد ميبوظش الشكل
+      isScrollControlled: true,
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -170,8 +215,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-
-                  // --- قسم البحث ---
                   Text(
                     "بحث سريع",
                     style: TextStyle(
@@ -198,21 +241,16 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               icon: const Icon(Icons.clear, size: 20),
                               onPressed: () {
                                 _searchController.clear();
-                                setSheetState(
-                                  () {},
-                                ); // تحديث حالة الشيت لمسح الزر
+                                setSheetState(() {});
                               },
                             )
                           : null,
                     ),
                     onChanged: (val) => setSheetState(() {}),
                   ),
-
                   const SizedBox(height: 25),
-                  const Divider(), // ✅ فاصل بين البحث والفلتر
+                  const Divider(),
                   const SizedBox(height: 10),
-
-                  // --- قسم الفلتر (التاريخ) ---
                   Text(
                     "نطاق العرض",
                     style: TextStyle(
@@ -246,10 +284,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 30),
-
-                  // --- زر التطبيق ---
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -261,11 +296,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         ),
                       ),
                       onPressed: () {
-                        // ✅ تطبيق التغييرات على الشاشة الرئيسية
+                        // ✅ تطبيق التغييرات وتحديث الستريم
                         setState(() {
                           _searchQuery = _searchController.text.trim();
-                          // الفلتر _filterType تم تحديثه بالفعل داخل الـ StatefulBuilder
                         });
+                        _updateStream(); // 🔄 إعادة طلب البيانات بالفلتر الجديد
                         Navigator.pop(context);
                       },
                       child: const Text(
@@ -286,7 +321,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
-  // ودجت صغيرة لأزرار الفلتر
   Widget _buildFilterChip({
     required String label,
     required bool isSelected,
@@ -320,7 +354,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
-  // --- ديالوج إدارة التصنيفات ---
   void _showManageCategoriesDialog(StateSetter updateParentState) {
     if (!_canAdd) {
       ScaffoldMessenger.of(
@@ -406,7 +439,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
-  // --- ديالوج إضافة/تعديل مصروف ---
   void _showExpenseDialog({Map<String, dynamic>? expenseToEdit}) {
     if (expenseToEdit == null && !_canAdd) return;
     if (expenseToEdit != null && !_canAdd) return;
@@ -750,9 +782,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await PurchasesService().deleteExpense(
-                id,
-              ); // نقل للسلة (Soft Delete)
+              await PurchasesService().deleteExpense(id);
             },
             child: const Text('نقل للسلة', style: TextStyle(color: Colors.red)),
           ),
@@ -768,42 +798,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ? "${_getMonthName(_selectedDate.month)} ${_selectedDate.year}"
         : "${_selectedDate.year}";
 
-    // 1. تحديد نطاق التاريخ للفلترة
-    String startDate, endDate;
-    if (_filterType == ExpenseFilter.monthly) {
-      DateTime start = DateTime(_selectedDate.year, _selectedDate.month, 1);
-      DateTime end = DateTime(
-        _selectedDate.year,
-        _selectedDate.month + 1,
-        0,
-        23,
-        59,
-        59,
-      );
-      startDate = start.toIso8601String();
-      endDate = end.toIso8601String();
-    } else {
-      DateTime start = DateTime(_selectedDate.year, 1, 1);
-      DateTime end = DateTime(_selectedDate.year, 12, 31, 23, 59, 59);
-      startDate = start.toIso8601String();
-      endDate = end.toIso8601String();
-    }
-
-    // ✅✅ 2. دمج فلتر التاريخ مع فلتر البحث في جملة واحدة للـ Stream ✅✅
-    String filterString =
-        'is_deleted = false && date >= "$startDate" && date <= "$endDate"';
-    if (_searchQuery.isNotEmpty) {
-      // البحث في العنوان أو التصنيف أو الملاحظات
-      filterString +=
-          ' && (title ~ "$_searchQuery" || category ~ "$_searchQuery" || notes ~ "$_searchQuery")';
-    }
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('إدارة المصروفات'),
         centerTitle: true,
         actions: [
-          // ✅ الأيقونة الموحدة للبحث والفلتر
           IconButton(
             icon: Stack(
               children: [
@@ -870,13 +869,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           ),
         ),
       ),
+      // ✅ استخدام الستريم الثابت هنا
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        // بنطلب ستريم بالفلتر المدمج
-        stream: PBHelper().getCollectionStream(
-          'expenses',
-          filter: filterString,
-          sort: '-date',
-        ),
+        stream: _expensesStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());

@@ -11,7 +11,6 @@ import 'services/notice_service.dart';
 import 'login_screen.dart';
 import 'notification_service.dart';
 import 'background_listener.dart';
-import 'package:flutter_quill/flutter_quill.dart';
 
 import 'services/settings_service.dart';
 
@@ -91,7 +90,6 @@ class AlSakrApp extends StatelessWidget {
                 GlobalMaterialLocalizations.delegate,
                 GlobalWidgetsLocalizations.delegate,
                 GlobalCupertinoLocalizations.delegate,
-                FlutterQuillLocalizations.delegate,
               ],
               locale: currentLocale,
               themeMode: currentTheme,

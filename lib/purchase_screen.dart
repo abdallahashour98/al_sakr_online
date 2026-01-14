@@ -8,7 +8,7 @@ import 'supplier_dialog.dart';
 import 'package:flutter/services.dart';
 
 class PurchaseScreen extends StatefulWidget {
-  // ✅ متغيرات جديدة لاستقبال بيانات التعديل
+  // ✅ متغيرات استقبال بيانات التعديل
   final Map<String, dynamic>? oldPurchaseData;
   final List<Map<String, dynamic>>? initialItems;
 
@@ -100,6 +100,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
           'quantity': qty,
           'price': price,
           'total': (qty * price).toDouble(),
+          'imagePath': '', // يمكن تحسين جلب الصورة هنا لو متاحة
         });
       }
     }
@@ -193,307 +194,25 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     }
   }
 
-  void _showSearchDialog({required bool isSupplier}) {
-    showDialog(
+  // ✅✅ تم تحسين دالة البحث: الآن تستدعي كلاس منفصل للأداء الأفضل
+  void _showSearchDialog({required bool isSupplier}) async {
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) {
-        String query = '';
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-
-        return StatefulBuilder(
-          builder: (ctx, setStateSB) {
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              child: Container(
-                width: double.maxFinite,
-                constraints: const BoxConstraints(maxHeight: 600),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Text(
-                      isSupplier ? 'بحث عن مورد' : 'اختر صنفاً',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      autofocus: true,
-                      onChanged: (val) => setStateSB(() => query = val),
-                      decoration: InputDecoration(
-                        hintText: 'اكتب للبحث...',
-                        prefixIcon: const Icon(
-                          Icons.search,
-                          color: Colors.grey,
-                        ),
-                        filled: true,
-                        fillColor: isDark ? Colors.grey[850] : Colors.grey[200],
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(15),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                          horizontal: 16,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Expanded(
-                      child: StreamBuilder<List<Map<String, dynamic>>>(
-                        stream: PBHelper().getCollectionStream(
-                          isSupplier ? 'suppliers' : 'products',
-                          sort: isSupplier ? 'name' : '-created',
-                        ),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData)
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-
-                          final allItems = snapshot.data!;
-                          final filteredList = allItems.where((item) {
-                            final q = query.toLowerCase();
-                            final name = (item['name'] ?? '')
-                                .toString()
-                                .toLowerCase();
-                            if (isSupplier) {
-                              return name.contains(q);
-                            } else {
-                              final code = (item['code'] ?? '')
-                                  .toString()
-                                  .toLowerCase();
-                              return name.contains(q) || code.contains(q);
-                            }
-                          }).toList();
-
-                          if (filteredList.isEmpty) {
-                            return Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.search_off,
-                                  size: 50,
-                                  color: Colors.grey[400],
-                                ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  "لا توجد نتائج",
-                                  style: TextStyle(color: Colors.grey[500]),
-                                ),
-                              ],
-                            );
-                          }
-
-                          return ListView.separated(
-                            itemCount: filteredList.length,
-                            separatorBuilder: (c, i) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (context, index) {
-                              final item = filteredList[index];
-                              return GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    if (isSupplier) {
-                                      _selectedSupplierId = item['id'];
-                                      _supplierSearchController.text =
-                                          item['name'];
-                                    } else {
-                                      _selectedProductId = item['id'];
-                                      _productSearchController.text =
-                                          item['name'];
-                                      _costPriceController.text =
-                                          item['buyPrice'].toString();
-                                    }
-                                  });
-                                  Navigator.pop(ctx);
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? Colors.grey[800]
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: isDark
-                                          ? Colors.grey[700]!
-                                          : Colors.grey[300]!,
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 50,
-                                        height: 50,
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          color: Colors.grey[200],
-                                        ),
-                                        child: isSupplier
-                                            ? const Icon(
-                                                Icons.local_shipping,
-                                                size: 25,
-                                                color: Colors.grey,
-                                              )
-                                            : _buildProductImage(
-                                                item['imagePath'],
-                                                size: 50,
-                                              ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            SizedBox(
-                                              height: 20,
-                                              child: ScrollingText(
-                                                text: item['name'],
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 14,
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(height: 6),
-                                            if (!isSupplier)
-                                              Row(
-                                                children: [
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 8,
-                                                          vertical: 2,
-                                                        ),
-                                                    decoration: BoxDecoration(
-                                                      color:
-                                                          (item['stock'] ?? 0) >
-                                                              0
-                                                          ? Colors.green
-                                                                .withOpacity(
-                                                                  0.1,
-                                                                )
-                                                          : Colors.red
-                                                                .withOpacity(
-                                                                  0.1,
-                                                                ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            6,
-                                                          ),
-                                                      border: Border.all(
-                                                        color:
-                                                            (item['stock'] ??
-                                                                    0) >
-                                                                0
-                                                            ? Colors.green
-                                                                  .withOpacity(
-                                                                    0.3,
-                                                                  )
-                                                            : Colors.red
-                                                                  .withOpacity(
-                                                                    0.3,
-                                                                  ),
-                                                      ),
-                                                    ),
-                                                    child: Row(
-                                                      children: [
-                                                        Icon(
-                                                          Icons
-                                                              .inventory_2_outlined,
-                                                          size: 12,
-                                                          color:
-                                                              (item['stock'] ??
-                                                                      0) >
-                                                                  0
-                                                              ? Colors.green
-                                                              : Colors.red,
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 4,
-                                                        ),
-                                                        Text(
-                                                          "${item['stock']}",
-                                                          style: TextStyle(
-                                                            fontSize: 12,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            color:
-                                                                (item['stock'] ??
-                                                                        0) >
-                                                                    0
-                                                                ? Colors.green
-                                                                : Colors.red,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  Text(
-                                                    "شراء: ${item['buyPrice']}",
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.brown[400],
-                                                    ),
-                                                  ),
-                                                ],
-                                              )
-                                            else
-                                              Text(
-                                                item['phone'] ?? '',
-                                                style: const TextStyle(
-                                                  color: Colors.grey,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.red,
-                        ),
-                        child: const Text("إلغاء"),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+      builder: (ctx) => _SearchDialog(isSupplier: isSupplier),
     );
+
+    if (result != null) {
+      setState(() {
+        if (isSupplier) {
+          _selectedSupplierId = result['id'];
+          _supplierSearchController.text = result['name'];
+        } else {
+          _selectedProductId = result['id'];
+          _productSearchController.text = result['name'];
+          _costPriceController.text = result['buyPrice'].toString();
+        }
+      });
+    }
   }
 
   void _addToCart() {
@@ -585,6 +304,23 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     }
   }
 
+  void _editItem(int index) {
+    final item = _cart[index];
+    setState(() {
+      // 1. إرجاع البيانات للحقول
+      _productSearchController.text = item['name'];
+      _costPriceController.text = item['price'].toString();
+      _qtyController.text = item['quantity'].toString();
+
+      // 2. تحديد الايدي عشان الحفظ يشتغل
+      _selectedProductId = item['productId'];
+
+      // 3. حذف من القائمة
+      _cart.removeAt(index);
+    });
+  }
+
+  // ✅✅ تم تحسين دالة الصور (Image Caching Optimization)
   Widget _buildProductImage(String? imagePath, {double size = 45}) {
     if (imagePath != null && imagePath.isNotEmpty) {
       if (imagePath.startsWith('http')) {
@@ -595,6 +331,8 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
             width: size,
             height: size,
             fit: BoxFit.cover,
+            // 🚀 تحسين: تحديد أبعاد الكاش لتقليل استهلاك الذاكرة
+            cacheWidth: (size * 2).toInt(),
             errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
           ),
         );
@@ -606,6 +344,8 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
             width: size,
             height: size,
             fit: BoxFit.cover,
+            // 🚀 تحسين محلي
+            cacheWidth: (size * 2).toInt(),
           ),
         );
       }
@@ -754,8 +494,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                           decimal: true,
                                         ),
                                     inputFormatters: [
-                                      FilteringTextInputFormatter
-                                          .digitsOnly, // أرقام صحيحة فقط
+                                      FilteringTextInputFormatter.digitsOnly,
                                     ],
                                     decoration: const InputDecoration(
                                       labelText: 'كمية',
@@ -829,8 +568,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                                 controller: _qtyController,
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [
-                                  FilteringTextInputFormatter
-                                      .digitsOnly, // أرقام صحيحة فقط
+                                  FilteringTextInputFormatter.digitsOnly,
                                 ],
                                 decoration: const InputDecoration(
                                   labelText: 'كمية',
@@ -878,23 +616,24 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
                       separatorBuilder: (c, i) => const SizedBox(height: 5),
                       itemBuilder: (c, i) => Card(
                         child: ListTile(
+                          leading: _buildProductImage(_cart[i]['imagePath']),
                           title: Text(
                             _cart[i]['name'],
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           subtitle: Text(
-                            "${_cart[i]['quantity']} x ${_cart[i]['price']}",
+                            "${_cart[i]['quantity']} x ${_cart[i]['price']} ج.م",
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                "${_cart[i]['total']} ج.م",
+                                "${(_cart[i]['total'] as num).toDouble().toStringAsFixed(1)} ج.م",
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   color: accentColor,
                                 ),
-                              ), // ✅ زر التعديل الجديد
+                              ),
                               IconButton(
                                 icon: const Icon(
                                   Icons.edit,
@@ -1207,24 +946,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     );
   }
 
-  // ✅ دالة تعديل الصنف للمشتريات
-  void _editItem(int index) {
-    final item = _cart[index];
-    setState(() {
-      // 1. إرجاع البيانات للحقول
-      _productSearchController.text = item['name'];
-      _costPriceController.text = item['price']
-          .toString(); // لاحظ: هنا بنستخدم costPrice
-      _qtyController.text = item['quantity'].toString();
-
-      // 2. تحديد الايدي عشان الحفظ يشتغل
-      _selectedProductId = item['productId'];
-
-      // 3. حذف من القائمة
-      _cart.removeAt(index);
-    });
-  }
-
   Widget _buildTaxToggle(
     String label,
     bool value,
@@ -1280,7 +1001,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
   }
 }
 
-// --- كلاس النص المتحرك ---
 class ScrollingText extends StatefulWidget {
   final String text;
   final TextStyle? style;
@@ -1339,6 +1059,296 @@ class _ScrollingTextState extends State<ScrollingText>
       scrollDirection: Axis.horizontal,
       physics: const NeverScrollableScrollPhysics(),
       child: Text(widget.text, style: widget.style),
+    );
+  }
+}
+
+// ✅✅✅ الكلاس الجديد للبحث المحسن (Performance Optimization) ✅✅✅
+class _SearchDialog extends StatefulWidget {
+  final bool isSupplier;
+  const _SearchDialog({required this.isSupplier});
+
+  @override
+  State<_SearchDialog> createState() => _SearchDialogState();
+}
+
+class _SearchDialogState extends State<_SearchDialog> {
+  late Stream<List<Map<String, dynamic>>> _stream;
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ تهيئة الستريم مرة واحدة فقط عند فتح الديالوج
+    _stream = PBHelper().getCollectionStream(
+      widget.isSupplier ? 'suppliers' : 'products',
+      sort: widget.isSupplier ? 'name' : '-created',
+    );
+  }
+
+  // Helper للصور داخل البحث
+  Widget _buildProductImage(String? imagePath, {double size = 30}) {
+    if (imagePath != null && imagePath.isNotEmpty) {
+      if (imagePath.startsWith('http')) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            imagePath,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            // 🚀 تحسين الكاش لتقليل الذاكرة
+            cacheWidth: (size * 2).toInt(),
+            errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+          ),
+        );
+      } else if (File(imagePath).existsSync()) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            File(imagePath),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            cacheWidth: (size * 2).toInt(),
+          ),
+        );
+      }
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.asset(
+        'assets/splash_logo.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+      ),
+    );
+  }
+
+  // Helper لحالة المخزون
+  Widget _buildStockIndicator(dynamic stockVal) {
+    int stock = (stockVal ?? 0);
+    bool inStock = stock > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: inStock
+            ? Colors.green.withOpacity(0.1)
+            : Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: inStock
+              ? Colors.green.withOpacity(0.3)
+              : Colors.red.withOpacity(0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 12,
+            color: inStock ? Colors.green : Colors.red,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            "$stock",
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: inStock ? Colors.green : Colors.red,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      child: Container(
+        width: double.maxFinite,
+        constraints: const BoxConstraints(maxHeight: 600),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Text(
+              widget.isSupplier ? 'بحث عن مورد' : 'اختر صنفاً',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              autofocus: true,
+              // ✅ هنا يتم تحديث متغير البحث فقط، ولا يعاد بناء الستريم
+              onChanged: (val) => setState(() => _query = val),
+              decoration: InputDecoration(
+                hintText: 'اكتب للبحث...',
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                filled: true,
+                fillColor: isDark ? Colors.grey[850] : Colors.grey[200],
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(15),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                  horizontal: 16,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: _stream, // ✅ استخدام المتغير الثابت
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final allItems = snapshot.data!;
+
+                  // ✅ الفلترة تتم محلياً
+                  final filteredList = allItems.where((item) {
+                    final q = _query.toLowerCase();
+                    final name = (item['name'] ?? '').toString().toLowerCase();
+                    if (widget.isSupplier) {
+                      return name.contains(q);
+                    } else {
+                      final code = (item['code'] ?? '')
+                          .toString()
+                          .toLowerCase();
+                      return name.contains(q) || code.contains(q);
+                    }
+                  }).toList();
+
+                  if (filteredList.isEmpty) {
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.search_off,
+                          size: 50,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          "لا توجد نتائج",
+                          style: TextStyle(color: Colors.grey[500]),
+                        ),
+                      ],
+                    );
+                  }
+
+                  return ListView.separated(
+                    itemCount: filteredList.length,
+                    separatorBuilder: (c, i) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final item = filteredList[index];
+                      return GestureDetector(
+                        onTap: () => Navigator.pop(context, item),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.grey[800] : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.grey[200],
+                                ),
+                                child: widget.isSupplier
+                                    ? const Icon(
+                                        Icons.local_shipping,
+                                        size: 25,
+                                        color: Colors.grey,
+                                      )
+                                    : _buildProductImage(
+                                        item['imagePath'],
+                                        size: 40,
+                                      ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      height: 20,
+                                      child: ScrollingText(
+                                        text: item['name'],
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    if (!widget.isSupplier)
+                                      Row(
+                                        children: [
+                                          _buildStockIndicator(item['stock']),
+                                          const SizedBox(width: 12),
+                                          Text(
+                                            "شراء: ${item['buyPrice']}",
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.brown[400],
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    else
+                                      Text(
+                                        item['phone'] ?? 'لا يوجد رقم',
+                                        style: const TextStyle(
+                                          color: Colors.grey,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text("إلغاء"),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

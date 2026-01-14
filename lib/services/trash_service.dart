@@ -1,4 +1,3 @@
-import 'package:pocketbase/pocketbase.dart';
 import 'pb_helper.dart';
 
 class TrashService {

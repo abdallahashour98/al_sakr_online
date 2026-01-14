@@ -3,7 +3,7 @@ import 'package:al_sakr/services/purchases_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:http/http.dart' as http; // ✅ ضروري جداً لرفع الصور
+import 'package:http/http.dart' as http;
 import 'services/auth_service.dart';
 import 'supplier_dialog.dart';
 
@@ -23,6 +23,9 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   String _searchQuery = "";
   final TextEditingController _searchController = TextEditingController();
 
+  // ✅ متغير الستريم الثابت
+  late Stream<List<Map<String, dynamic>>> _suppliersStream;
+
   bool _canAdd = false;
   bool _canEdit = false;
   bool _canDelete = false;
@@ -34,6 +37,11 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     super.initState();
     _loadPermissions();
     _loadStaticStats();
+    // ✅ تهيئة الستريم مرة واحدة
+    _suppliersStream = PBHelper().getCollectionStream(
+      'suppliers',
+      sort: 'name',
+    );
   }
 
   Future<void> _loadPermissions() async {
@@ -126,13 +134,8 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
             onPressed: () async {
               Navigator.pop(ctx);
               try {
-                // 1. استدعاء دالة النقل للسلة من السيرفس
                 await PurchasesService().deleteSupplier(id);
-
-                // 2. تحديث الإحصائيات (الأرقام اللي فوق)
-                // القائمة نفسها هتتحدث لوحدها عشان StreamBuilder
                 _loadStaticStats();
-
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text("تم نقل المورد للسلة ♻️")),
@@ -165,8 +168,9 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(title: const Text('إدارة الموردين'), centerTitle: true),
+      // ✅ استخدام الستريم الثابت
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: PBHelper().getCollectionStream('suppliers', sort: 'name'),
+        stream: _suppliersStream,
         builder: (context, snapshot) {
           if (snapshot.hasError)
             return Center(child: Text("خطأ: ${snapshot.error}"));
@@ -175,9 +179,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
 
           final allSuppliers = snapshot.data!;
           final filtered = allSuppliers.where((s) {
-            // ✅ إخفاء المحذوف
             if (s['is_deleted'] == true) return false;
-
             return _searchQuery.isEmpty ||
                 s['name'].toString().toLowerCase().contains(
                   _searchQuery.toLowerCase(),
@@ -234,6 +236,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                         const SizedBox(height: 10),
                         TextField(
                           controller: _searchController,
+                          // ✅ تحديث الحالة عند البحث ليعيد بناء الـ Builder فقط
                           onChanged: (val) =>
                               setState(() => _searchQuery = val),
                           style: TextStyle(color: textColor),
@@ -444,6 +447,10 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   }
 }
 
+// ---------------------------------------------
+// بقية كود SupplierDetailScreen
+// (يفضل تركه كما هو أو تطبيق نفس المنطق إذا كان هناك بحث داخلي ثقيل)
+// ---------------------------------------------
 // =============================================================================
 // شاشة التفاصيل (SupplierDetailScreen) - النسخة المحسنة
 // =============================================================================

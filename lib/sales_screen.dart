@@ -9,26 +9,12 @@ import 'package:flutter/services.dart';
 /// ============================================================
 /// 🛒 شاشة المبيعات (Sales Screen) - نقطة البيع (POS)
 /// ============================================================
-/// الغرض:
-/// تتيح للمستخدم (/المسؤول) إنشاء فواتير مبيعات جديدة.
-///
-/// الميزات الأساسية:
-/// 1. البحث عن العملاء وإضافتهم.
-/// 2. البحث عن المنتجات (بالاسم أو الكود) وإضافتها للسلة.
-/// 3. حساب العمليات الحسابية (الضرائب، الخصم، الإجمالي) تلقائياً.
-/// 4. التعامل مع الصلاحيات (User Permissions) لإخفاء/إظهار الميزات.
-/// 5. تصميم متجاوب (Responsive) يعمل على الموبايل والكمبيوتر.
 class SalesScreen extends StatefulWidget {
-  // ✅ 1. أضف المتغيرات دي هنا
   final Map<String, dynamic>? oldSaleData;
   final List<Map<String, dynamic>>? initialItems;
 
-  // ✅ 2. عدل الـ Constructor ليستقبلهم
-  const SalesScreen({
-    super.key,
-    this.oldSaleData, // ✅ المتغير الجديد
-    this.initialItems,
-  });
+  const SalesScreen({super.key, this.oldSaleData, this.initialItems});
+
   @override
   State<SalesScreen> createState() => _SalesScreenState();
 }
@@ -38,77 +24,54 @@ class _SalesScreenState extends State<SalesScreen> {
   // 1️⃣ إدارة الحالة والمتغيرات (State & Variables)
   // ============================================================
 
-  /// سلة المشتريات: قائمة تحتوي على المنتجات التي تم اختيارها للفاتورة الحالية
   final List<Map<String, dynamic>> _invoiceItems = [];
-
-  /// العميل المختار حالياً للفاتورة
   Map<String, dynamic>? _selectedClient;
-
-  /// المنتج الذي يتم تجهيزه للإضافة (Temp selection)
   Map<String, dynamic>? _selectedProduct;
 
-  // --- أدوات التحكم في النصوص (Text Controllers) ---
+  // --- أدوات التحكم في النصوص ---
   final _clientSearchController = TextEditingController();
   final _productSearchController = TextEditingController();
-  final _qtyController = TextEditingController(
-    text: '1',
-  ); // القيمة الافتراضية 1
+  final _qtyController = TextEditingController(text: '1');
   final _priceController = TextEditingController();
-  final _discountController = TextEditingController(
-    text: '0',
-  ); // خصم إضافي على الفاتورة
-  final _refController =
-      TextEditingController(); // رقم الفاتورة اليدوي أو المرجعي
+  final _discountController = TextEditingController(text: '0');
+  final _refController = TextEditingController();
 
-  // --- إعدادات الفاتورة (Flags) ---
-  bool _isTaxEnabled = false; // هل يتم تطبيق ضريبة القيمة المضافة 14%؟
-  bool _isWhtEnabled = false; // هل يتم تطبيق ضريبة الخصم من المنبع 1%؟
-  bool _isCashPayment = true; // نوع الفاتورة: كاش (true) أو آجل (false)
-  DateTime _invoiceDate = DateTime.now(); // تاريخ الفاتورة
+  // --- إعدادات الفاتورة ---
+  bool _isTaxEnabled = false;
+  bool _isWhtEnabled = false;
+  bool _isCashPayment = true;
+  DateTime _invoiceDate = DateTime.now();
 
-  // --- الصلاحيات (Permissions) ---
-  // يتم تحميل هذه القيم من قاعدة البيانات عند فتح الشاشة
+  // --- الصلاحيات ---
   bool _canAddOrder = false;
   bool _canAddClient = false;
   bool _canAddProduct = false;
 
-  /// معرف المدير العام (Super Admin) - يمتلك كل الصلاحيات دائماً
   final String _superAdminId = "1sxo74splxbw1yh";
 
   @override
   void initState() {
     super.initState();
-    // عند بدء الشاشة، نبدأ فوراً في جلب صلاحيات المستخدم
     _loadPermissions();
 
-    // ✅✅ الإضافة الجديدة: استقبال بيانات التعديل وتعبئة الشاشة ✅✅
-    // ✅✅ منطق التعبئة الذكي للتعديل ✅✅
+    // ✅ منطق التعبئة للتعديل
     if (widget.oldSaleData != null) {
       final old = widget.oldSaleData!;
-
-      // 1. تعبئة العميل
       _selectedClient = {'id': old['client'], 'name': old['clientName']};
       _clientSearchController.text = old['clientName'] ?? '';
 
-      // 2. تعبئة التاريخ والرقم اليدوي
       if (old['date'] != null) _invoiceDate = DateTime.parse(old['date']);
       _refController.text = old['referenceNumber'] ?? '';
-
-      // 3. تعبئة نوع الدفع (كاش/آجل)
       _isCashPayment = (old['paymentType'] == 'cash');
 
-      // 4. ✅✅ تفعيل الضرائب تلقائياً إذا كانت موجودة
       double tax = (old['taxAmount'] ?? 0).toDouble();
       double wht = (old['whtAmount'] ?? 0).toDouble();
 
-      _isTaxEnabled = tax > 0; // لو فيه ضريبة، علم على الزرار
-      _isWhtEnabled = wht > 0; // لو فيه خصم منبع، علم على الزرار
-
-      // تعبئة الخصم الإضافي
+      _isTaxEnabled = tax > 0;
+      _isWhtEnabled = wht > 0;
       _discountController.text = (old['discount'] ?? 0).toString();
     }
 
-    // 5. تعبئة المنتجات (كما كانت سابقاً مع إصلاح الـ ID)
     if (widget.initialItems != null) {
       for (var item in widget.initialItems!) {
         String pId = '';
@@ -128,19 +91,16 @@ class _SalesScreenState extends State<SalesScreen> {
           'price': (item['price'] as num).toDouble(),
           'total': ((item['quantity'] as num) * (item['price'] as num))
               .toDouble(),
-          'imagePath': '',
+          'imagePath': '', // يمكن تحسين جلب الصورة هنا لو متاحة
         });
       }
     }
   }
 
-  /// 🔐 دالة تحميل الصلاحيات (Authorization Logic)
-  /// تتحقق من هوية المستخدم الحالي وتفعل الأزرار بناءً على صلاحياته في الـ Database
   Future<void> _loadPermissions() async {
     final myId = PBHelper().pb.authStore.record?.id;
     if (myId == null) return;
 
-    // 1. لو المستخدم هو الـ Super Admin -> افتح كل الصلاحيات فوراً
     if (myId == _superAdminId) {
       if (mounted) {
         setState(() {
@@ -152,7 +112,6 @@ class _SalesScreenState extends State<SalesScreen> {
       return;
     }
 
-    // 2. لو مستخدم عادي -> اسأل قاعدة البيانات (Users Collection)
     try {
       final userRecord = await PBHelper().pb.collection('users').getOne(myId);
       if (mounted) {
@@ -168,45 +127,31 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 
   // ============================================================
-  // 2️⃣ "الآلة الحاسبة" (Getters for Calculations)
+  // 2️⃣ الحسابات
   // ============================================================
-  // هذه الدوال تحسب الأرقام ديناميكياً بناءً على محتوى السلة والخيارات المفعلة
 
-  /// مجموع أسعار المنتجات قبل أي خصم أو ضريبة
-  // ✅ التصحيح: استخدام (as num).toDouble()
   double get _subTotal => _invoiceItems.fold(
     0.0,
     (sum, item) => sum + (item['total'] as num).toDouble(),
   );
 
-  /// قيمة الخصم المكتوبة في الحقل
   double get _discount => double.tryParse(_discountController.text) ?? 0.0;
-
-  /// المبلغ الخاضع للضريبة (الإجمالي الفرعي - الخصم)
   double get _taxableAmount => _subTotal - _discount;
-
-  /// قيمة الضريبة المضافة (14%) إذا كانت مفعلة
   double get _taxAmount => _isTaxEnabled ? _taxableAmount * 0.14 : 0.0;
-
-  /// قيمة ضريبة الخصم والتحصيل (1%) إذا كانت مفعلة
   double get _whtAmount => _isWhtEnabled ? _taxableAmount * 0.01 : 0.0;
-
-  /// صافي الفاتورة النهائي المطلوب دفعه
   double get _grandTotal => _taxableAmount + _taxAmount - _whtAmount;
 
   // ============================================================
-  // 3️⃣ الحوارات والنوافذ المنبثقة (Dialogs)
+  // 3️⃣ الديالوجات والبحث
   // ============================================================
 
-  /// فتح نافذة إضافة عميل جديد
   Future<void> _openAddClientDialog() async {
-    if (!_canAddClient) return; // حماية إضافية للصلاحية
+    if (!_canAddClient) return;
     final result = await showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => const ClientDialog(),
     );
-    // إذا تم إضافة عميل بنجاح، يتم اختياره تلقائياً
     if (result != null && result is Map) {
       setState(() {
         _selectedClient = result as Map<String, dynamic>;
@@ -215,7 +160,6 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
-  /// فتح نافذة إضافة منتج جديد
   Future<void> _openAddProductDialog() async {
     if (!_canAddProduct) return;
     final result = await showDialog(
@@ -232,307 +176,32 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
-  /// 🔎 دالة البحث الشاملة (Universal Search Dialog)
-  /// تستخدم للبحث عن العملاء (isClient = true) أو المنتجات (isClient = false)
-  /// - تدعم البحث بالاسم وبالكود (للمنتجات).
-  /// - تعرض النتائج بشكل فوري (Real-time Stream).
-  void _showSearchDialog({required bool isClient}) {
-    showDialog(
+  // ✅✅ تم تحسين دالة البحث: الآن تستدعي كلاس منفصل للأداء الأفضل
+  void _showSearchDialog({required bool isClient}) async {
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) {
-        String query = '';
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-
-        return StatefulBuilder(
-          builder: (ctx, setStateSB) {
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              child: Container(
-                width: double.maxFinite,
-                constraints: const BoxConstraints(maxHeight: 600),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // عنوان البحث
-                    Text(
-                      isClient ? 'بحث عن عميل' : 'اختر صنفاً',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // حقل كتابة البحث
-                    TextField(
-                      autofocus: true,
-                      onChanged: (val) => setStateSB(() => query = val),
-                      decoration: InputDecoration(
-                        hintText: 'اكتب للبحث...',
-                        prefixIcon: const Icon(
-                          Icons.search,
-                          color: Colors.grey,
-                        ),
-                        filled: true,
-                        fillColor: isDark ? Colors.grey[850] : Colors.grey[200],
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(15),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                          horizontal: 16,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // عرض النتائج باستخدام Stream
-                    Expanded(
-                      child: StreamBuilder<List<Map<String, dynamic>>>(
-                        stream: PBHelper().getCollectionStream(
-                          isClient ? 'clients' : 'products',
-                          sort: isClient ? 'name' : '-created',
-                        ),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          }
-                          final allItems = snapshot.data!;
-
-                          // عملية الفلترة (Client-side filtering)
-                          final filteredList = allItems.where((item) {
-                            final q = query.toLowerCase();
-                            final name = (item['name'] ?? '')
-                                .toString()
-                                .toLowerCase();
-                            if (isClient) {
-                              return name.contains(q);
-                            } else {
-                              // في المنتجات نبحث بالاسم أو الباركود
-                              final code = (item['code'] ?? '')
-                                  .toString()
-                                  .toLowerCase();
-                              return name.contains(q) || code.contains(q);
-                            }
-                          }).toList();
-
-                          if (filteredList.isEmpty) {
-                            return Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.search_off,
-                                  size: 50,
-                                  color: Colors.grey[400],
-                                ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  "لا توجد نتائج",
-                                  style: TextStyle(color: Colors.grey[500]),
-                                ),
-                              ],
-                            );
-                          }
-
-                          return ListView.separated(
-                            itemCount: filteredList.length,
-                            separatorBuilder: (c, i) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (context, index) {
-                              final item = filteredList[index];
-
-                              return GestureDetector(
-                                onTap: () {
-                                  // عند اختيار عنصر، نحدث المتغيرات ونغلق البحث
-                                  setState(() {
-                                    if (isClient) {
-                                      _selectedClient = item;
-                                      _clientSearchController.text =
-                                          item['name'];
-                                    } else {
-                                      _selectedProduct = item;
-                                      _productSearchController.text =
-                                          item['name'];
-                                      _priceController.text = item['sellPrice']
-                                          .toString();
-                                    }
-                                  });
-                                  Navigator.pop(ctx);
-                                },
-                                // تصميم كارت العنصر في البحث
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? Colors.grey[800]
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: isDark
-                                          ? Colors.grey[700]!
-                                          : Colors.grey[300]!,
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      // صورة العنصر
-                                      Container(
-                                        width: 30,
-                                        height: 30,
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          color: Colors.grey[200],
-                                        ),
-                                        child: isClient
-                                            ? const Icon(
-                                                Icons.person,
-                                                size: 25,
-                                                color: Colors.grey,
-                                              )
-                                            : _buildProductImage(
-                                                item['imagePath'],
-                                                size: 25,
-                                              ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      // تفاصيل الاسم والسعر/الرقم
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            SizedBox(
-                                              height: 20,
-                                              child: ScrollingText(
-                                                text: item['name'],
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 14,
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(height: 6),
-                                            if (!isClient)
-                                              Row(
-                                                children: [
-                                                  // حالة المخزون (أخضر=متاح، أحمر=نفد)
-                                                  _buildStockIndicator(
-                                                    item['stock'],
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  Text(
-                                                    "${item['sellPrice']} ج.م",
-                                                    style: TextStyle(
-                                                      fontSize: 14,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.blue[700],
-                                                    ),
-                                                  ),
-                                                ],
-                                              )
-                                            else
-                                              Text(
-                                                item['phone'] ?? 'لا يوجد رقم',
-                                                style: const TextStyle(
-                                                  color: Colors.grey,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                    // زر الإلغاء
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.red,
-                        ),
-                        child: const Text("إلغاء"),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+      builder: (ctx) => _SearchDialog(isClient: isClient),
     );
-  }
 
-  // Helper widget لعرض حالة المخزون داخل البحث
-  Widget _buildStockIndicator(dynamic stockVal) {
-    int stock = (stockVal ?? 0);
-    bool inStock = stock > 0;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: inStock
-            ? Colors.green.withOpacity(0.1)
-            : Colors.red.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: inStock
-              ? Colors.green.withOpacity(0.3)
-              : Colors.red.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.inventory_2_outlined,
-            size: 12,
-            color: inStock ? Colors.green : Colors.red,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            "$stock",
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: inStock ? Colors.green : Colors.red,
-            ),
-          ),
-        ],
-      ),
-    );
+    if (result != null) {
+      setState(() {
+        if (isClient) {
+          _selectedClient = result;
+          _clientSearchController.text = result['name'];
+        } else {
+          _selectedProduct = result;
+          _productSearchController.text = result['name'];
+          _priceController.text = (result['sellPrice'] ?? 0).toString();
+        }
+      });
+    }
   }
 
   // ============================================================
-  // 4️⃣ منطق الفاتورة (Invoice Logic)
+  // 4️⃣ منطق الفاتورة
   // ============================================================
 
-  /// إضافة صنف للسلة (Invoice Items)
-  /// تقوم هذه الدالة بالتحقق من المدخلات، وتحديث الكمية إذا كان الصنف موجوداً مسبقاً
   void _addItemToInvoice() {
-    // 1. التحقق من صحة المدخلات
     if (_selectedProduct == null ||
         _qtyController.text.isEmpty ||
         _priceController.text.isEmpty) {
@@ -543,26 +212,16 @@ class _SalesScreenState extends State<SalesScreen> {
     double price = double.tryParse(_priceController.text) ?? 0.0;
     if (qty <= 0) return;
 
-    // TODO: تفعيل التحقق من المخزون عند الحاجة
-    // int currentStock = (_selectedProduct!['stock'] as num).toInt();
-    // if (qty > currentStock) {
-    //   _showError('الكمية غير متوفرة! المتاح: $currentStock');
-    //   return;
-    // }
-
     setState(() {
-      // 2. البحث: هل المنتج ده موجود في الليستة قبل كده؟
       final existingIndex = _invoiceItems.indexWhere(
         (item) => item['productId'] == _selectedProduct!['id'],
       );
 
       if (existingIndex >= 0) {
-        // لو موجود -> زود الكمية على القديم
         int newQty = _invoiceItems[existingIndex]['quantity'] + qty;
         _invoiceItems[existingIndex]['quantity'] = newQty;
         _invoiceItems[existingIndex]['total'] = newQty * price;
       } else {
-        // لو جديد -> ضيف سطر جديد
         _invoiceItems.add({
           'productId': _selectedProduct!['id'],
           'name': _selectedProduct!['name'],
@@ -573,7 +232,6 @@ class _SalesScreenState extends State<SalesScreen> {
         });
       }
 
-      // 3. إعادة تهيئة حقول الإدخال للمنتج القادم
       _selectedProduct = null;
       _productSearchController.clear();
       _priceController.clear();
@@ -581,35 +239,27 @@ class _SalesScreenState extends State<SalesScreen> {
     });
   }
 
-  // ✅ دالة تعديل الصنف (استرجاع البيانات للحقول وحذفه من القائمة)
   void _editItem(int index) {
     final item = _invoiceItems[index];
     setState(() {
-      // 1. إرجاع البيانات لحقول الإدخال
       _productSearchController.text = item['name'];
       _priceController.text = item['price'].toString();
       _qtyController.text = item['quantity'].toString();
 
-      // 2. تجهيز المتغير _selectedProduct عشان زرار الإضافة يشتغل
-      // بنعمل "محاكاة" للمنتج كأننا اخترناه من البحث
       _selectedProduct = {
         'id': item['productId'],
         'name': item['name'],
         'imagePath': item['imagePath'],
-        // مش محتاجين باقي البيانات زي المخزن في اللحظة دي
       };
 
-      // 3. حذف الصنف من القائمة عشان يتعدل وينضاف تاني
       _invoiceItems.removeAt(index);
     });
   }
 
-  /// حذف صنف من القائمة
   void _removeItem(int index) {
     setState(() => _invoiceItems.removeAt(index));
   }
 
-  /// 💾 حفظ الفاتورة في قاعدة البيانات
   Future<void> _saveInvoice() async {
     if (!_canAddOrder) {
       _showError('ليس لديك صلاحية لإضافة فواتير');
@@ -621,14 +271,10 @@ class _SalesScreenState extends State<SalesScreen> {
     }
 
     try {
-      // ✅✅ التغيير الجوهري هنا:
-      // إذا كنا في وضع التعديل (يوجد oldSaleData)، نقوم بحذف الفاتورة القديمة الآن فقط
       if (widget.oldSaleData != null) {
-        // استدعاء دالة الحذف الآمن التي أصلحناها سابقاً
         await SalesService().deleteSaleSafe(widget.oldSaleData!['id']);
       }
 
-      // ثم ننشئ الفاتورة الجديدة
       await SalesService().createSale(
         _selectedClient!['id'],
         _selectedClient!['name'],
@@ -649,11 +295,10 @@ class _SalesScreenState extends State<SalesScreen> {
           ),
         );
 
-        // لو كنا بنعدل، نرجع للشاشة اللي فاتت عشان التحديث يظهر
         if (widget.oldSaleData != null) {
           Navigator.pop(context);
         } else {
-          _resetScreen(); // لو جديد، فضي الشاشة
+          _resetScreen();
         }
       }
     } catch (e) {
@@ -661,7 +306,6 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
-  /// إعادة تعيين الشاشة لوضعها الافتراضي (تفريغ الحقول)
   void _resetScreen() {
     setState(() {
       _invoiceItems.clear();
@@ -683,10 +327,7 @@ class _SalesScreenState extends State<SalesScreen> {
     ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
-  // ============================================================
-  // 5️⃣ بناء الواجهة (UI Build Method)
-  // ============================================================
-
+  // ✅✅ تم تحسين دالة الصور (Image Caching Optimization)
   Widget _buildProductImage(String? imagePath, {double size = 25}) {
     if (imagePath != null && imagePath.isNotEmpty) {
       if (imagePath.startsWith('http')) {
@@ -697,6 +338,8 @@ class _SalesScreenState extends State<SalesScreen> {
             width: size,
             height: size,
             fit: BoxFit.cover,
+            // 🚀 تحسين: تحديد أبعاد الكاش لتقليل استهلاك الذاكرة
+            cacheWidth: (size * 2).toInt(),
             errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
           ),
         );
@@ -708,6 +351,8 @@ class _SalesScreenState extends State<SalesScreen> {
             width: size,
             height: size,
             fit: BoxFit.cover,
+            // 🚀 تحسين محلي
+            cacheWidth: (size * 2).toInt(),
           ),
         );
       }
@@ -723,22 +368,22 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  //
+  // ============================================================
+  // 5️⃣ بناء الواجهة
+  // ============================================================
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accentColor = isDark ? Colors.blue[300]! : Colors.blue[800]!;
-
-    // ✅ Responsive Logic: تحديد عرض الشاشة لتغيير التخطيط (Layout)
     bool isWide = MediaQuery.of(context).size.width > 600;
 
     return Scaffold(
       appBar: AppBar(title: const Text('فاتورة مبيعات'), centerTitle: true),
-
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
-            // 🟥 الجزء الأول: كارت البيانات الأساسية (عميل، تاريخ، رقم فاتورة)
+            // 🟥 الجزء الأول: البيانات الأساسية
             SliverToBoxAdapter(
               child: Card(
                 margin: const EdgeInsets.all(10),
@@ -746,7 +391,7 @@ class _SalesScreenState extends State<SalesScreen> {
                   padding: const EdgeInsets.all(12.0),
                   child: Column(
                     children: [
-                      // الصف الأول: اسم العميل
+                      // اسم العميل
                       TextField(
                         controller: _clientSearchController,
                         readOnly: true,
@@ -756,10 +401,6 @@ class _SalesScreenState extends State<SalesScreen> {
                           prefixIcon: const Icon(Icons.person),
                           border: const OutlineInputBorder(),
                           isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 12,
-                          ),
                           suffixIcon: _canAddClient
                               ? IconButton(
                                   icon: const Icon(
@@ -773,7 +414,7 @@ class _SalesScreenState extends State<SalesScreen> {
                       ),
                       const SizedBox(height: 10),
 
-                      // الصف الثاني: التاريخ ورقم الفاتورة اليدوي
+                      // التاريخ ورقم الفاتورة
                       Row(
                         children: [
                           Expanded(
@@ -796,10 +437,6 @@ class _SalesScreenState extends State<SalesScreen> {
                                   ),
                                   border: OutlineInputBorder(),
                                   isDense: true,
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 12,
-                                  ),
                                 ),
                                 child: Text(
                                   "${_invoiceDate.year}-${_invoiceDate.month}-${_invoiceDate.day}",
@@ -817,10 +454,6 @@ class _SalesScreenState extends State<SalesScreen> {
                                 prefixIcon: Icon(Icons.receipt_long, size: 18),
                                 border: OutlineInputBorder(),
                                 isDense: true,
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 12,
-                                ),
                               ),
                             ),
                           ),
@@ -828,12 +461,11 @@ class _SalesScreenState extends State<SalesScreen> {
                       ),
 
                       const SizedBox(height: 10),
-                      const Divider(), // فاصل
+                      const Divider(),
                       const SizedBox(height: 5),
 
-                      // الصف الثالث: منطقة إضافة المنتجات (تختلف حسب حجم الشاشة)
+                      // إضافة المنتجات
                       if (!isWide)
-                        // تصميم الموبايل (عناصر فوق بعض)
                         Column(
                           children: [
                             TextField(
@@ -845,10 +477,6 @@ class _SalesScreenState extends State<SalesScreen> {
                                 prefixIcon: const Icon(Icons.shopping_bag),
                                 border: const OutlineInputBorder(),
                                 isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 12,
-                                ),
                                 suffixIcon: _canAddProduct
                                     ? IconButton(
                                         icon: const Icon(
@@ -869,21 +497,17 @@ class _SalesScreenState extends State<SalesScreen> {
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
                                           decimal: true,
-                                        ), // لوحة أرقام بكسور
+                                        ),
                                     inputFormatters: [
                                       FilteringTextInputFormatter.allow(
                                         RegExp(r'^\d*\.?\d*'),
-                                      ), // السماح بأرقام ونقطة واحدة فقط
+                                      ),
                                     ],
                                     textAlign: TextAlign.center,
                                     decoration: const InputDecoration(
                                       labelText: 'سعر',
                                       border: OutlineInputBorder(),
                                       isDense: true,
-                                      contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 5,
-                                        vertical: 12,
-                                      ),
                                     ),
                                   ),
                                 ),
@@ -891,21 +515,15 @@ class _SalesScreenState extends State<SalesScreen> {
                                 Expanded(
                                   child: TextField(
                                     controller: _qtyController,
-                                    keyboardType:
-                                        TextInputType.number, // لوحة أرقام
+                                    keyboardType: TextInputType.number,
                                     inputFormatters: [
-                                      FilteringTextInputFormatter
-                                          .digitsOnly, // أرقام صحيحة فقط (بدون نقطة)
+                                      FilteringTextInputFormatter.digitsOnly,
                                     ],
                                     textAlign: TextAlign.center,
                                     decoration: const InputDecoration(
                                       labelText: 'عدد',
                                       border: OutlineInputBorder(),
                                       isDense: true,
-                                      contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 5,
-                                        vertical: 12,
-                                      ),
                                     ),
                                   ),
                                 ),
@@ -930,7 +548,6 @@ class _SalesScreenState extends State<SalesScreen> {
                           ],
                         )
                       else
-                        // تصميم الكمبيوتر (عناصر بجانب بعض)
                         Row(
                           children: [
                             Expanded(
@@ -964,11 +581,11 @@ class _SalesScreenState extends State<SalesScreen> {
                                 keyboardType:
                                     const TextInputType.numberWithOptions(
                                       decimal: true,
-                                    ), // لوحة أرقام بكسور
+                                    ),
                                 inputFormatters: [
                                   FilteringTextInputFormatter.allow(
                                     RegExp(r'^\d*\.?\d*'),
-                                  ), // السماح بأرقام ونقطة واحدة فقط
+                                  ),
                                 ],
                                 textAlign: TextAlign.center,
                                 decoration: const InputDecoration(
@@ -983,14 +600,9 @@ class _SalesScreenState extends State<SalesScreen> {
                               width: 100,
                               child: TextField(
                                 controller: _qtyController,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ), // لوحة أرقام بكسور
+                                keyboardType: TextInputType.number,
                                 inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'^\d*\.?\d*'),
-                                  ), // السماح بأرقام ونقطة واحدة فقط
+                                  FilteringTextInputFormatter.digitsOnly,
                                 ],
                                 textAlign: TextAlign.center,
                                 decoration: const InputDecoration(
@@ -1019,7 +631,7 @@ class _SalesScreenState extends State<SalesScreen> {
               ),
             ),
 
-            // 🟥 الجزء الثاني: قائمة العناصر المضافة (السلة)
+            // 🟥 الجزء الثاني: السلة
             SliverToBoxAdapter(
               child: _invoiceItems.isEmpty
                   ? const SizedBox(
@@ -1055,12 +667,12 @@ class _SalesScreenState extends State<SalesScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  "${(item['total'] as num).toDouble().toStringAsFixed(1)}", // 👈 استخدم num ثم toDouble
+                                  "${(item['total'] as num).toDouble().toStringAsFixed(1)}",
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     color: accentColor,
                                   ),
-                                ), // ✅ زر التعديل الجديد
+                                ),
                                 IconButton(
                                   icon: const Icon(
                                     Icons.edit,
@@ -1085,7 +697,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     ),
             ),
 
-            // 🟥 الجزء الثالث: لوحة التحكم السفلية (الحسابات والدفع)
+            // 🟥 الجزء الثالث: الفوتر
             SliverFillRemaining(
               hasScrollBody: false,
               child: Column(
@@ -1110,9 +722,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // --- أزرار التحكم في الضرائب والدفع ---
                         if (!isWide)
-                          // موبايل (عمودي)
                           Column(
                             children: [
                               _buildSegmentedPaymentToggle(isDark),
@@ -1143,7 +753,6 @@ class _SalesScreenState extends State<SalesScreen> {
                             ],
                           )
                         else
-                          // كمبيوتر (أفقي وموزع)
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
@@ -1191,7 +800,6 @@ class _SalesScreenState extends State<SalesScreen> {
                         const SizedBox(height: 20),
                         const Divider(),
 
-                        // --- ملخص الحسابات (أرقام فقط) ---
                         _buildSummaryLine("Total Befor Add Tax", _subTotal),
                         if (_isTaxEnabled)
                           _buildSummaryLine(
@@ -1213,7 +821,6 @@ class _SalesScreenState extends State<SalesScreen> {
                           ),
                         const SizedBox(height: 20),
 
-                        // --- زر الحفظ النهائي ---
                         GestureDetector(
                           onTap: _saveInvoice,
                           child: Container(
@@ -1279,11 +886,6 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  // ============================================================
-  // 6️⃣ أدوات بناء الواجهة (Widget Builders)
-  // ============================================================
-
-  /// إنشاء زر التبديل بين الكاش والآجل
   Widget _buildSegmentedPaymentToggle(bool isDark) {
     return Container(
       height: 50,
@@ -1351,19 +953,14 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  /// حقل إدخال الخصم (Discount Field)
   Widget _buildDiscountField(bool isDark) {
     return SizedBox(
       height: 50,
       child: TextField(
         controller: _discountController,
-        keyboardType: const TextInputType.numberWithOptions(
-          decimal: true,
-        ), // لوحة أرقام بكسور
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
         inputFormatters: [
-          FilteringTextInputFormatter.allow(
-            RegExp(r'^\d*\.?\d*'),
-          ), // أرقام وكسور فقط
+          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
         ],
         textAlign: TextAlign.center,
         style: TextStyle(
@@ -1390,7 +987,6 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  /// زر تبديل الضرائب (Tax Toggle Button)
   Widget _buildTaxToggle(
     String label,
     bool value,
@@ -1446,8 +1042,6 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 }
 
-// --- كلاس النص المتحرك (مهم جداً للنصوص الطويلة) ---
-/// ويدجت لعرض نص يتحرك تلقائياً (Marquee) إذا كان أطول من المساحة المتاحة
 class ScrollingText extends StatefulWidget {
   final String text;
   final TextStyle? style;
@@ -1512,6 +1106,296 @@ class _ScrollingTextState extends State<ScrollingText>
       scrollDirection: Axis.horizontal,
       physics: const NeverScrollableScrollPhysics(),
       child: Text(widget.text, style: widget.style),
+    );
+  }
+}
+
+// ✅✅✅ الكلاس الجديد للبحث المحسن ✅✅✅
+class _SearchDialog extends StatefulWidget {
+  final bool isClient;
+  const _SearchDialog({required this.isClient});
+
+  @override
+  State<_SearchDialog> createState() => _SearchDialogState();
+}
+
+class _SearchDialogState extends State<_SearchDialog> {
+  late Stream<List<Map<String, dynamic>>> _stream;
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ تهيئة الستريم مرة واحدة فقط عند فتح الديالوج
+    _stream = PBHelper().getCollectionStream(
+      widget.isClient ? 'clients' : 'products',
+      sort: widget.isClient ? 'name' : '-created',
+    );
+  }
+
+  // Helper للصور داخل البحث
+  Widget _buildProductImage(String? imagePath, {double size = 30}) {
+    if (imagePath != null && imagePath.isNotEmpty) {
+      if (imagePath.startsWith('http')) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            imagePath,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            // 🚀 تحسين الكاش
+            cacheWidth: (size * 2).toInt(),
+            errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+          ),
+        );
+      } else if (File(imagePath).existsSync()) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            File(imagePath),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            cacheWidth: (size * 2).toInt(),
+          ),
+        );
+      }
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.asset(
+        'assets/splash_logo.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+      ),
+    );
+  }
+
+  // Helper لحالة المخزون
+  Widget _buildStockIndicator(dynamic stockVal) {
+    int stock = (stockVal ?? 0);
+    bool inStock = stock > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: inStock
+            ? Colors.green.withOpacity(0.1)
+            : Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: inStock
+              ? Colors.green.withOpacity(0.3)
+              : Colors.red.withOpacity(0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 12,
+            color: inStock ? Colors.green : Colors.red,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            "$stock",
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: inStock ? Colors.green : Colors.red,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      child: Container(
+        width: double.maxFinite,
+        constraints: const BoxConstraints(maxHeight: 600),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Text(
+              widget.isClient ? 'بحث عن عميل' : 'اختر صنفاً',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              autofocus: true,
+              // ✅ هنا يتم تحديث متغير البحث فقط، ولا يعاد بناء الستريم
+              onChanged: (val) => setState(() => _query = val),
+              decoration: InputDecoration(
+                hintText: 'اكتب للبحث...',
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                filled: true,
+                fillColor: isDark ? Colors.grey[850] : Colors.grey[200],
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(15),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                  horizontal: 16,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: _stream, // ✅ استخدام المتغير الثابت
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final allItems = snapshot.data!;
+
+                  // ✅ الفلترة تتم محلياً
+                  final filteredList = allItems.where((item) {
+                    final q = _query.toLowerCase();
+                    final name = (item['name'] ?? '').toString().toLowerCase();
+                    if (widget.isClient) {
+                      return name.contains(q);
+                    } else {
+                      final code = (item['code'] ?? '')
+                          .toString()
+                          .toLowerCase();
+                      return name.contains(q) || code.contains(q);
+                    }
+                  }).toList();
+
+                  if (filteredList.isEmpty) {
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.search_off,
+                          size: 50,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          "لا توجد نتائج",
+                          style: TextStyle(color: Colors.grey[500]),
+                        ),
+                      ],
+                    );
+                  }
+
+                  return ListView.separated(
+                    itemCount: filteredList.length,
+                    separatorBuilder: (c, i) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final item = filteredList[index];
+                      return GestureDetector(
+                        onTap: () => Navigator.pop(context, item),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.grey[800] : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[300]!,
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.grey[200],
+                                ),
+                                child: widget.isClient
+                                    ? const Icon(
+                                        Icons.person,
+                                        size: 25,
+                                        color: Colors.grey,
+                                      )
+                                    : _buildProductImage(
+                                        item['imagePath'],
+                                        size: 40,
+                                      ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      height: 20,
+                                      child: ScrollingText(
+                                        text: item['name'],
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    if (!widget.isClient)
+                                      Row(
+                                        children: [
+                                          _buildStockIndicator(item['stock']),
+                                          const SizedBox(width: 12),
+                                          Text(
+                                            "${item['sellPrice']} ج.م",
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.blue[700],
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    else
+                                      Text(
+                                        item['phone'] ?? 'لا يوجد رقم',
+                                        style: const TextStyle(
+                                          color: Colors.grey,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text("إلغاء"),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

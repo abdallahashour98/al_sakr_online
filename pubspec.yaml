@@ -58,12 +58,10 @@ dependencies:
   pdf: ^3.10.4
   open_file: ^3.5.10
   printing: ^5.11.0
-  docx_template: ^0.4.0
   syncfusion_flutter_pdf: ^24.1.41
   syncfusion_flutter_core: ^24.1.41
   arabic_reshaper: ^0.0.1
   provider: ^6.0.0
-  flutter_quill: ^11.5.0
   flutter_local_notifications: ^19.5.0
   flutter_background_service: ^5.0.0 # عشان يشتغل في الخلفية (للأندرويد)
   badges: ^3.1.2
@@ -127,7 +125,6 @@ flutter:
     - assets/fonts/Tinos-Bold.ttf
     - assets/fonts/Amiri-Regular.ttf
     - assets/fonts/Amiri-Bold.ttf
-    - assets/delivery_template.docx
 
   # To add assets to your application, add an assets section, like this:
   # assets:

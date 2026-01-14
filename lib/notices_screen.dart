@@ -2,14 +2,16 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // ✅ ضروري للنسخ
-import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:pocketbase/pocketbase.dart';
 import 'services/notice_service.dart';
 import 'services/pb_helper.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+// =========================================================
+// 1. الشاشة الرئيسية (سريعة جداً 🚀)
+// =========================================================
 class NoticesScreen extends StatefulWidget {
   const NoticesScreen({super.key});
 
@@ -22,11 +24,21 @@ class _NoticesScreenState extends State<NoticesScreen> {
   final String _superAdminId = "1sxo74splxbw1yh";
   String _currentUserId = "";
 
+  // ✅ 1. تعريف متغير الستريم هنا لمنع إعادة التحميل مع كل لمسة
+  late Stream<List<Map<String, dynamic>>> _noticesStream;
+
   @override
   void initState() {
     super.initState();
     final user = NoticeService().pb.authStore.record;
     _currentUserId = user?.id ?? "";
+
+    // ✅ 2. تشغيل الستريم مرة واحدة فقط عند فتح الشاشة
+    _noticesStream = PBHelper().getCollectionStream(
+      'announcements',
+      sort: '-created',
+      expand: 'seen_by,target_users,user',
+    );
   }
 
   @override
@@ -37,16 +49,19 @@ class _NoticesScreenState extends State<NoticesScreen> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 800),
           child: StreamBuilder<List<Map<String, dynamic>>>(
-            stream: PBHelper().getCollectionStream(
-              'announcements',
-              sort: '-created',
-              expand: 'seen_by,target_users,user',
-            ),
+            stream: _noticesStream, // ✅ استخدام المتغير المحفوظ
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
+              }
+
+              if (snapshot.hasError) {
+                return Center(child: Text("حدث خطأ: ${snapshot.error}"));
+              }
 
               final allNotices = snapshot.data ?? [];
+
+              // تصفية القائمة
               final notices = allNotices.where((notice) {
                 if (_currentUserId == _superAdminId) return true;
                 if (notice['user'] == _currentUserId) return true;
@@ -58,16 +73,12 @@ class _NoticesScreenState extends State<NoticesScreen> {
                 return targets.contains(_currentUserId);
               }).toList();
 
-              if (notices.isEmpty)
+              if (notices.isEmpty) {
                 return const Center(child: Text("لا توجد اشعارات"));
+              }
 
               return ListView.separated(
-                padding: const EdgeInsets.only(
-                  top: 16,
-                  left: 16,
-                  right: 16,
-                  bottom: 100,
-                ),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
                 itemCount: notices.length,
                 separatorBuilder: (c, i) => const SizedBox(height: 16),
                 itemBuilder: (context, index) {
@@ -85,7 +96,7 @@ class _NoticesScreenState extends State<NoticesScreen> {
                           superAdminId: _superAdminId,
                         ),
                       );
-                      if (mounted) setState(() {});
+                      // لا نحتاج setState هنا لأن الستريم سيحدث نفسه تلقائياً
                     },
                   );
                 },
@@ -105,7 +116,6 @@ class _NoticesScreenState extends State<NoticesScreen> {
                     superAdminId: _superAdminId,
                   ),
                 );
-                if (mounted) setState(() {});
               },
               label: const Text("اشعار جديد"),
               icon: const Icon(Icons.add),
@@ -117,7 +127,7 @@ class _NoticesScreenState extends State<NoticesScreen> {
 }
 
 // =========================================================
-// 🚀 نافذة الإضافة/التعديل (مفصولة لتسريع الأداء)
+// 2. نافذة الإضافة/التعديل (التصميم الجديد ✅)
 // =========================================================
 class AddEditNoticeDialog extends StatefulWidget {
   final Map<String, dynamic>? existingNotice;
@@ -137,7 +147,7 @@ class AddEditNoticeDialog extends StatefulWidget {
 
 class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
   late TextEditingController titleCtrl;
-  late quill.QuillController _quillController;
+  late TextEditingController contentCtrl;
   late String priority;
 
   List<PlatformFile> selectedFiles = [];
@@ -155,6 +165,9 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
     titleCtrl = TextEditingController(
       text: isEdit ? widget.existingNotice!['title'] : '',
     );
+
+    String rawContent = isEdit ? (widget.existingNotice!['content'] ?? '') : '';
+    contentCtrl = TextEditingController(text: _cleanContent(rawContent));
 
     priority = isEdit
         ? (widget.existingNotice!['priority'] ?? 'normal')
@@ -175,27 +188,12 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
         selectedUserIds = targets.map((e) => e.toString()).toList();
       }
     }
-
-    quill.Document doc = quill.Document();
-    if (isEdit && widget.existingNotice!['content'] != null) {
-      try {
-        doc = quill.Document.fromJson(
-          jsonDecode(widget.existingNotice!['content']),
-        );
-      } catch (e) {
-        doc = quill.Document()..insert(0, widget.existingNotice!['content']);
-      }
-    }
-    _quillController = quill.QuillController(
-      document: doc,
-      selection: const TextSelection.collapsed(offset: 0),
-    );
   }
 
   @override
   void dispose() {
     titleCtrl.dispose();
-    _quillController.dispose();
+    contentCtrl.dispose();
     super.dispose();
   }
 
@@ -276,12 +274,10 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
   }
 
   Future<void> _save() async {
-    if (titleCtrl.text.isNotEmpty && !_quillController.document.isEmpty()) {
+    if (titleCtrl.text.isNotEmpty && contentCtrl.text.isNotEmpty) {
       setState(() => _isLoading = true);
       try {
-        String contentJson = jsonEncode(
-          _quillController.document.toDelta().toJson(),
-        );
+        String contentText = contentCtrl.text;
         List<File> filesToUpload = selectedFiles
             .map((e) => File(e.path!))
             .toList();
@@ -290,14 +286,14 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
           await NoticeService().updateAnnouncement(
             widget.existingNotice!['id'],
             titleCtrl.text,
-            contentJson,
+            contentText,
             priority,
             targetUserIds: isAllEmployees ? null : selectedUserIds,
           );
         } else {
           await NoticeService().createAnnouncement(
             titleCtrl.text,
-            contentJson,
+            contentText,
             priority,
             files: filesToUpload,
             targetUserIds: isAllEmployees ? [] : selectedUserIds,
@@ -347,7 +343,7 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
           : Container(
               width: isMobile ? size.width : 550,
               constraints: BoxConstraints(maxHeight: size.height * 0.9),
-              padding: const EdgeInsets.all(15),
+              padding: const EdgeInsets.all(20),
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
                 child: Column(
@@ -375,7 +371,9 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 15),
+                    const SizedBox(height: 20),
+
+                    // Priority
                     Wrap(
                       spacing: 8,
                       alignment: WrapAlignment.center,
@@ -400,7 +398,9 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 15),
+                    const SizedBox(height: 20),
+
+                    // Target Users
                     InkWell(
                       onTap: () {
                         setState(() => isAllEmployees = !isAllEmployees);
@@ -408,10 +408,7 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                       },
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           border: Border.all(
                             color: Colors.grey.withOpacity(0.3),
@@ -435,9 +432,10 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                               ),
                             ),
                             if (!isAllEmployees)
-                              IconButton(
-                                icon: const Icon(Icons.settings, size: 20),
-                                onPressed: pickUsers,
+                              const Icon(
+                                Icons.settings,
+                                size: 20,
+                                color: Colors.blue,
                               )
                             else
                               Switch(
@@ -456,7 +454,9 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 15),
+                    const SizedBox(height: 20),
+
+                    // Title
                     TextField(
                       controller: titleCtrl,
                       decoration: InputDecoration(
@@ -472,7 +472,46 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                         prefixIcon: Icon(Icons.title, color: activeColor),
                       ),
                     ),
+                    const SizedBox(height: 20),
+
+                    // ✅ تفاصيل الإشعار (مفصول عن الحقل لحل مشكلة الشكل)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 5, bottom: 8),
+                          child: Text(
+                            "تفاصيل الإشعار",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: isDark
+                                  ? Colors.grey[400]
+                                  : Colors.grey[700],
+                            ),
+                          ),
+                        ),
+                        TextField(
+                          controller: contentCtrl,
+                          minLines: 4,
+                          maxLines: 15,
+                          decoration: InputDecoration(
+                            hintText: "اكتب التفاصيل هنا...",
+                            filled: true,
+                            fillColor: isDark
+                                ? const Color(0xFF252525)
+                                : Colors.grey[100],
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
                     const SizedBox(height: 15),
+
+                    // Files Preview
                     if (selectedFiles.isNotEmpty || existingImages.isNotEmpty)
                       Container(
                         height: 70,
@@ -489,149 +528,40 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                                 widget.existingNotice!['id'],
                                 img,
                               );
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                child: Container(
-                                  width: 60,
-                                  height: 60,
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: Colors.grey.withOpacity(0.3),
-                                    ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: isDoc
-                                      ? const Icon(
-                                          Icons.description,
-                                          color: Colors.blue,
-                                        )
-                                      : Image.network(url, fit: BoxFit.cover),
-                                ),
-                              );
+                              return _buildFilePreview(isDoc, url: url);
                             }),
                             ...selectedFiles.map((f) {
                               String ext = f.extension?.toLowerCase() ?? "";
                               bool isDoc =
                                   ext == 'pdf' || ext == 'doc' || ext == 'docx';
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                child: Stack(
-                                  children: [
-                                    Container(
-                                      width: 60,
-                                      height: 60,
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey[200],
-                                        borderRadius: BorderRadius.circular(8),
+                              return Stack(
+                                children: [
+                                  _buildFilePreview(isDoc, file: File(f.path!)),
+                                  Positioned(
+                                    right: 0,
+                                    top: 0,
+                                    child: InkWell(
+                                      onTap: () => setState(
+                                        () => selectedFiles.remove(f),
                                       ),
-                                      child: isDoc
-                                          ? const Icon(
-                                              Icons.description,
-                                              color: Colors.blue,
-                                            )
-                                          : Image.file(
-                                              File(f.path!),
-                                              fit: BoxFit.cover,
-                                            ),
-                                    ),
-                                    Positioned(
-                                      right: 0,
-                                      top: 0,
-                                      child: InkWell(
-                                        onTap: () => setState(
-                                          () => selectedFiles.remove(f),
-                                        ),
-                                        child: const CircleAvatar(
-                                          radius: 10,
-                                          backgroundColor: Colors.red,
-                                          child: Icon(
-                                            Icons.close,
-                                            size: 12,
-                                            color: Colors.white,
-                                          ),
+                                      child: const CircleAvatar(
+                                        radius: 10,
+                                        backgroundColor: Colors.red,
+                                        child: Icon(
+                                          Icons.close,
+                                          size: 12,
+                                          color: Colors.white,
                                         ),
                                       ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               );
                             }),
                           ],
                         ),
                       ),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF252525)
-                            : Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.withOpacity(0.3)),
-                      ),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 5,
-                              horizontal: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isDark ? Colors.white10 : Colors.grey[200],
-                              borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(12),
-                              ),
-                            ),
-                            child: quill.QuillSimpleToolbar(
-                              controller: _quillController,
-                              config: const quill.QuillSimpleToolbarConfig(
-                                showFontFamily: false,
-                                showFontSize: false,
-                                showSearchButton: false,
-                                showInlineCode: false,
-                                showSubscript: false,
-                                showSuperscript: false,
-                                showBackgroundColorButton: false,
-                                showColorButton: false,
-                                showCodeBlock: false,
-                                showQuote: false,
-                                showIndent: false,
-                                showLink: false,
-                                showUndo: false,
-                                showRedo: false,
-                                showClipboardCut: false,
-                                showClipboardCopy: false,
-                                showClipboardPaste: false,
-                                multiRowsDisplay: false,
-                                showBoldButton: true,
-                                showItalicButton: true,
-                                showUnderLineButton: true,
-                                showListNumbers: true,
-                                showListBullets: true,
-                                showDirection: true,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            constraints: const BoxConstraints(
-                              minHeight: 150,
-                              maxHeight: 250,
-                            ),
-                            padding: const EdgeInsets.all(12),
-                            child: quill.QuillEditor.basic(
-                              controller: _quillController,
-                              config: const quill.QuillEditorConfig(
-                                placeholder: 'اكتب التفاصيل هنا...',
-                                autoFocus: false,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton.icon(
@@ -643,6 +573,7 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                       ),
                     ),
                     const SizedBox(height: 30),
+
                     SizedBox(
                       height: 50,
                       child: ElevatedButton.icon(
@@ -671,6 +602,26 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildFilePreview(bool isDoc, {String? url, File? file}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Container(
+        width: 60,
+        height: 60,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(8),
+          color: Colors.grey[200],
+        ),
+        child: isDoc
+            ? const Icon(Icons.description, color: Colors.blue)
+            : (file != null
+                  ? Image.file(file, fit: BoxFit.cover)
+                  : Image.network(url!, fit: BoxFit.cover)),
+      ),
     );
   }
 
@@ -709,7 +660,7 @@ class _AddEditNoticeDialogState extends State<AddEditNoticeDialog> {
 }
 
 // =========================================================
-// 🎨 كارت الإشعار (بنفس الستايل القديم ولكن سريع 🚀)
+// 3. كارت الإشعار (Stateful لأداء أفضل)
 // =========================================================
 class NoticeCard extends StatefulWidget {
   final Map<String, dynamic> notice;
@@ -730,47 +681,33 @@ class NoticeCard extends StatefulWidget {
 }
 
 class _NoticeCardState extends State<NoticeCard> {
-  late quill.QuillController _readOnlyController;
-  late quill.Document _doc;
+  // ✅ التخزين المؤقت للنص المعالج
+  late String _cachedContent;
 
   @override
   void initState() {
     super.initState();
-    try {
-      _doc = quill.Document.fromJson(jsonDecode(widget.notice['content']));
-    } catch (e) {
-      _doc = quill.Document()..insert(0, widget.notice['content']);
-    }
-    _readOnlyController = quill.QuillController(
-      document: _doc,
-      selection: const TextSelection.collapsed(offset: 0),
-      readOnly: true,
-    );
+    _cachedContent = _cleanContent(widget.notice['content'] ?? '');
   }
 
-  // ✅ دالة نسخ النص (الخاصية الجديدة)
-  Future<void> _copyToClipboard() async {
-    try {
-      String text = _readOnlyController.document.toPlainText().trim();
-      await Clipboard.setData(ClipboardData(text: text));
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("تم نسخ النص بنجاح ✅")));
-      }
-    } catch (e) {
-      // ignore
+  @override
+  void didUpdateWidget(NoticeCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.notice['content'] != oldWidget.notice['content']) {
+      setState(() {
+        _cachedContent = _cleanContent(widget.notice['content'] ?? '');
+      });
     }
   }
 
-  Future<void> _openFile(String url) async {
+  Future<void> _openFile(BuildContext context, String url) async {
     final Uri uri = Uri.parse(url);
     try {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         throw 'Could not launch $url';
       }
     } catch (e) {
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("تعذر فتح الملف")));
@@ -927,7 +864,6 @@ class _NoticeCardState extends State<NoticeCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. الرأس (Header)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Row(
@@ -976,18 +912,24 @@ class _NoticeCardState extends State<NoticeCard> {
                     ),
                   ),
                 ),
-
-                // ✅ زر النسخ الجديد (للجميع)
                 const SizedBox(width: 5),
                 InkWell(
-                  onTap: _copyToClipboard,
+                  onTap: () async {
+                    await Clipboard.setData(
+                      ClipboardData(text: _cachedContent),
+                    );
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("تم نسخ النص بنجاح ✅")),
+                      );
+                    }
+                  },
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
                     padding: const EdgeInsets.all(6),
                     child: Icon(Icons.copy, size: 18, color: Colors.grey[600]),
                   ),
                 ),
-
                 if (canControl) ...[
                   const SizedBox(width: 5),
                   InkWell(
@@ -1016,8 +958,6 @@ class _NoticeCardState extends State<NoticeCard> {
               ],
             ),
           ),
-
-          // 2. المحتوى (Quill Editor) - معدل ليكون سريعاً 🚀
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             child: Column(
@@ -1036,35 +976,12 @@ class _NoticeCardState extends State<NoticeCard> {
                     ),
                   ),
 
-                // 🔥🔥 السر هنا: IgnorePointer + تحديد الارتفاع + تعطيل التفاعل
-                Container(
-                  constraints: const BoxConstraints(
-                    maxHeight: 200,
-                  ), // يمنع التمدد اللانهائي
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.black12 : Colors.grey[50],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: IgnorePointer(
-                    ignoring: true,
-                    child: quill.QuillEditor.basic(
-                      controller: _readOnlyController,
-                      config: const quill.QuillEditorConfig(
-                        showCursor: false,
-                        autoFocus: false,
-                        enableInteractiveSelection: false, // 🚫 تعطيل التحديد
-                        enableSelectionToolbar: false, // 🚫 تعطيل القائمة
-                        checkBoxReadOnly: true,
-                        scrollable: true, // 🚫 منع السكرول الداخلي
-                        expands: false,
-                        padding: EdgeInsets.zero,
-                      ),
-                    ),
-                  ),
+                // ✅ عرض النص المحفوظ
+                SelectableText(
+                  _cachedContent,
+                  style: const TextStyle(fontSize: 14, height: 1.5),
                 ),
 
-                // 3. قائمة الملفات (Files List)
                 if (files.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 15),
@@ -1086,7 +1003,7 @@ class _NoticeCardState extends State<NoticeCard> {
                               ext == 'pdf' || ext == 'doc' || ext == 'docx';
                           return GestureDetector(
                             onTap: () => (isDoc)
-                                ? _openFile(url)
+                                ? _openFile(context, url)
                                 : _openImage(context, url),
                             child: Container(
                               width: 80,
@@ -1141,8 +1058,6 @@ class _NoticeCardState extends State<NoticeCard> {
             ),
           ),
           const Divider(height: 1),
-
-          // 4. التذييل (Footer) - المشاهدة وتأكيد القراءة
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
@@ -1269,6 +1184,9 @@ class _NoticeCardState extends State<NoticeCard> {
   }
 }
 
+// =========================================================
+// 4. دوال مساعدة
+// =========================================================
 Color getPriorityColor(String priority) {
   switch (priority) {
     case 'high':
@@ -1298,4 +1216,22 @@ String getPriorityText(String priority) {
     default:
       return "general";
   }
+}
+
+String _cleanContent(String content) {
+  try {
+    if (content.trim().startsWith('[')) {
+      List<dynamic> json = jsonDecode(content);
+      StringBuffer buffer = StringBuffer();
+      for (var item in json) {
+        if (item is Map && item.containsKey('insert')) {
+          buffer.write(item['insert']);
+        }
+      }
+      return buffer.toString().trim();
+    }
+  } catch (e) {
+    // ignore
+  }
+  return content;
 }
