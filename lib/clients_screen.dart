@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http; // ✅ للإرسال مع الصور
 import 'services/pb_helper.dart';
 import 'services/auth_service.dart';
 import 'services/sales_service.dart';
@@ -19,7 +21,6 @@ class _ClientsScreenState extends State<ClientsScreen> {
   String _searchQuery = "";
   final TextEditingController _searchController = TextEditingController();
 
-  // ✅ متغير الستريم الثابت
   late Stream<List<Map<String, dynamic>>> _clientsStream;
 
   bool _canAdd = false;
@@ -33,7 +34,6 @@ class _ClientsScreenState extends State<ClientsScreen> {
     super.initState();
     _loadPermissions();
     _loadStaticStats();
-    // ✅ تهيئة الستريم مرة واحدة فقط
     _clientsStream = PBHelper().getCollectionStream('clients', sort: 'name');
   }
 
@@ -76,8 +76,12 @@ class _ClientsScreenState extends State<ClientsScreen> {
       final receipts = await SalesService().getAllReceipts();
       double tSales = 0.0;
       double tCollected = 0.0;
-      for (var s in sales) tSales += (s['netAmount'] as num? ?? 0.0);
-      for (var r in receipts) tCollected += (r['amount'] as num? ?? 0.0);
+      for (var s in sales) {
+        tSales += (s['netAmount'] as num? ?? 0.0);
+      }
+      for (var r in receipts) {
+        tCollected += (r['amount'] as num? ?? 0.0);
+      }
       if (mounted) {
         setState(() {
           _totalSales = tSales;
@@ -151,17 +155,17 @@ class _ClientsScreenState extends State<ClientsScreen> {
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(title: const Text('إدارة العملاء'), centerTitle: true),
-      // ✅ استخدام الستريم الثابت
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _clientsStream,
         builder: (context, snapshot) {
-          if (snapshot.hasError)
+          if (snapshot.hasError) {
             return Center(child: Text("خطأ: ${snapshot.error}"));
-          if (!snapshot.hasData)
+          }
+          if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
+          }
 
           final allClients = snapshot.data!;
-          // ✅ الفلترة تتم محلياً هنا، مما يمنع إعادة تحميل الستريم
           final filteredClients = allClients.where((c) {
             if (c['is_deleted'] == true) return false;
             final name = c['name'].toString().toLowerCase();
@@ -183,7 +187,6 @@ class _ClientsScreenState extends State<ClientsScreen> {
 
           return Column(
             children: [
-              // لوحة الإحصائيات والبحث
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -226,7 +229,6 @@ class _ClientsScreenState extends State<ClientsScreen> {
                         const SizedBox(height: 10),
                         TextField(
                           controller: _searchController,
-                          // ✅ التحديث يحدث فقط setState ليعيد بناء الـ Builder بالفلتر الجديد
                           onChanged: (val) =>
                               setState(() => _searchQuery = val),
                           style: TextStyle(color: textColor),
@@ -251,8 +253,6 @@ class _ClientsScreenState extends State<ClientsScreen> {
                   ),
                 ),
               ),
-
-              // القائمة
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.only(top: 10, bottom: 120),
@@ -451,11 +451,9 @@ class _ClientsScreenState extends State<ClientsScreen> {
   }
 }
 
-// ---------------------------------------------
-// بقية كود ClientDetailScreen (بدون تغييرات جذرية في الأداء لأنها لا تحتوي على بحث مباشر ثقيل)
-// يمكنك تركه كما هو أو تطبيق نفس المنطق إذا كان هناك بحث داخلي
-// سأدرجه كما هو ليكون الملف كاملاً
-// ---------------------------------------------
+// =============================================================================
+// شاشة تفاصيل العميل (تم إضافة دالة التعديل كاملة) ✅
+// =============================================================================
 
 class ClientDetailScreen extends StatefulWidget {
   final Map<String, dynamic> client;
@@ -535,7 +533,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
         'date': s['date'],
         'type': 'فاتورة بيع',
         'amount': (s['netAmount'] as num).toDouble(),
-        'isDebit': true,
+        'isDebit': true, // عليه
         'category': 'فواتير',
         'rawDate': DateTime.parse(s['date']),
         'rawRecord': s,
@@ -547,7 +545,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
         'date': r['date'],
         'type': 'سند قبض',
         'amount': (r['amount'] as num).toDouble(),
-        'isDebit': false,
+        'isDebit': false, // له (سداد)
         'category': 'دفعات',
         'rawDate': DateTime.parse(r['date']),
         'note': r['notes'],
@@ -560,7 +558,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
         'date': rt['date'],
         'type': 'مرتجع بيع',
         'amount': (rt['totalAmount'] as num).toDouble(),
-        'isDebit': false,
+        'isDebit': false, // له (بينقص من الدين)
         'category': 'مرتجعات',
         'rawDate': DateTime.parse(rt['date']),
         'rawRecord': rt,
@@ -639,6 +637,316 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     }
   }
 
+  // ✅ دالة التعديل التي كانت ناقصة (تمت إضافتها بالكامل)
+  void _showEditReceiptDialog(Map<String, dynamic> rawRecord) {
+    final amountCtrl = TextEditingController(
+      text: rawRecord['amount'].toString(),
+    );
+    final notesCtrl = TextEditingController(
+      text: rawRecord['notes'] ?? rawRecord['note'],
+    );
+    String paymentMethod = rawRecord['method'] ?? 'cash';
+    DateTime selectedDate = DateTime.parse(rawRecord['date']);
+    double oldAmount = (rawRecord['amount'] as num).toDouble();
+
+    String? currentServerImage =
+        rawRecord['receiptImage'] != null &&
+            rawRecord['receiptImage'].toString().isNotEmpty
+        ? rawRecord['receiptImage']
+        : null;
+    String? newLocalImagePath;
+    bool deleteImage = false;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF2C2C2C) : Colors.white;
+    final txt = isDark ? Colors.white : Colors.black;
+    final border = isDark ? Colors.grey[600]! : Colors.grey;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) => AlertDialog(
+          backgroundColor: bg,
+          title: Text("تعديل السند", style: TextStyle(color: txt)),
+          content: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: amountCtrl,
+                    keyboardType: TextInputType.number,
+                    style: TextStyle(color: txt),
+                    decoration: InputDecoration(
+                      labelText: "المبلغ",
+                      labelStyle: TextStyle(color: isDark ? Colors.grey : null),
+                      prefixIcon: Icon(
+                        Icons.attach_money,
+                        color: isDark ? Colors.grey : null,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: border),
+                      ),
+                      focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.blue),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  DropdownButtonFormField<String>(
+                    initialValue: paymentMethod,
+                    dropdownColor: isDark
+                        ? const Color(0xFF333333)
+                        : Colors.white,
+                    decoration: InputDecoration(
+                      labelText: "طريقة الدفع",
+                      labelStyle: TextStyle(color: isDark ? Colors.grey : null),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: border),
+                      ),
+                    ),
+                    items: [
+                      DropdownMenuItem(
+                        value: "cash",
+                        child: Text(
+                          "نـقـدي (Cash)",
+                          style: TextStyle(color: txt),
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: "cheque",
+                        child: Text(
+                          "شـيـك (Cheque)",
+                          style: TextStyle(color: txt),
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: "bank_transfer",
+                        child: Text(
+                          "تحويل (Transfer)",
+                          style: TextStyle(color: txt),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) => setStateDialog(() => paymentMethod = v!),
+                  ),
+                  const SizedBox(height: 15),
+                  InkWell(
+                    onTap: () async {
+                      final d = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2030),
+                        builder: (c, child) => Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: isDark
+                                ? const ColorScheme.dark(
+                                    primary: Colors.blue,
+                                    onPrimary: Colors.white,
+                                    surface: Color(0xFF424242),
+                                    onSurface: Colors.white,
+                                  )
+                                : const ColorScheme.light(primary: Colors.blue),
+                            dialogTheme: DialogThemeData(
+                              backgroundColor: isDark
+                                  ? const Color(0xFF424242)
+                                  : Colors.white,
+                            ),
+                          ),
+                          child: child!,
+                        ),
+                      );
+                      if (d != null) setStateDialog(() => selectedDate = d);
+                    },
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: "التاريخ",
+                        labelStyle: TextStyle(
+                          color: isDark ? Colors.grey : null,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: border),
+                        ),
+                        prefixIcon: Icon(
+                          Icons.calendar_today,
+                          color: isDark ? Colors.grey : null,
+                        ),
+                      ),
+                      child: Text(
+                        DateFormat('yyyy-MM-dd').format(selectedDate),
+                        style: TextStyle(color: txt),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  GestureDetector(
+                    onTap: () async {
+                      final ImagePicker picker = ImagePicker();
+                      final XFile? image = await picker.pickImage(
+                        source: ImageSource.gallery,
+                      );
+                      if (image != null) {
+                        setStateDialog(() {
+                          newLocalImagePath = image.path;
+                          deleteImage = false;
+                        });
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: border),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.camera_alt,
+                            color: isDark ? Colors.grey : Colors.blueGrey,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              newLocalImagePath != null
+                                  ? "تم اختيار صورة جديدة ✅"
+                                  : (currentServerImage != null && !deleteImage
+                                        ? "يوجد صورة حالية (اضغط للتغيير)"
+                                        : "إرفاق صورة (اختياري)"),
+                              style: TextStyle(
+                                color: newLocalImagePath != null
+                                    ? Colors.green
+                                    : (isDark ? Colors.grey : Colors.black54),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (newLocalImagePath != null ||
+                              (currentServerImage != null && !deleteImage))
+                            IconButton(
+                              icon: const Icon(Icons.close, color: Colors.red),
+                              onPressed: () {
+                                setStateDialog(() {
+                                  newLocalImagePath = null;
+                                  if (currentServerImage != null)
+                                    deleteImage = true;
+                                });
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  TextField(
+                    controller: notesCtrl,
+                    style: TextStyle(color: txt),
+                    decoration: InputDecoration(
+                      labelText: "ملاحظات",
+                      labelStyle: TextStyle(color: isDark ? Colors.grey : null),
+                      prefixIcon: Icon(
+                        Icons.note,
+                        color: isDark ? Colors.grey : null,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: border),
+                      ),
+                      focusedBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.blue),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("إلغاء"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                double newAmount = double.tryParse(amountCtrl.text) ?? 0;
+                if (newAmount <= 0) return;
+
+                try {
+                  Map<String, dynamic> body = {
+                    'amount': newAmount,
+                    'notes': notesCtrl.text,
+                    'method': paymentMethod,
+                    'date': selectedDate.toIso8601String(),
+                  };
+                  if (deleteImage && newLocalImagePath == null) {
+                    body['receiptImage'] = null;
+                  }
+
+                  if (newLocalImagePath != null) {
+                    await PBHelper().pb
+                        .collection('receipts')
+                        .update(
+                          rawRecord['id'],
+                          body: body,
+                          files: [
+                            await http.MultipartFile.fromPath(
+                              'receiptImage',
+                              newLocalImagePath!,
+                            ),
+                          ],
+                        );
+                  } else {
+                    await PBHelper().pb
+                        .collection('receipts')
+                        .update(rawRecord['id'], body: body);
+                  }
+
+                  // تحديث رصيد العميل بالفرق
+                  // سند قبض زاد -> الدين يقل
+                  // Balance = OldBalance - (NewAmount - OldAmount)
+                  double diff = newAmount - oldAmount;
+                  final clientRec = await PBHelper().pb
+                      .collection('clients')
+                      .getOne(widget.client['id']);
+                  double currentBal = (clientRec.data['balance'] ?? 0)
+                      .toDouble();
+
+                  await PBHelper().pb
+                      .collection('clients')
+                      .update(
+                        widget.client['id'],
+                        body: {'balance': currentBal - diff},
+                      );
+
+                  if (mounted) {
+                    Navigator.pop(ctx);
+                    _loadDetails();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("تم التعديل بنجاح ✅"),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text("خطأ: $e")));
+                }
+              },
+              child: const Text("حفظ التعديلات"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _deleteReceipt(String receiptId, double amount) async {
     try {
       await PBHelper().pb.collection('receipts').delete(receiptId);
@@ -646,6 +954,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
           .collection('clients')
           .getOne(widget.client['id']);
       double currentBal = (clientRec.data['balance'] ?? 0).toDouble();
+      // حذف سند قبض -> الدين يرجع يزيد
       await PBHelper().pb
           .collection('clients')
           .update(widget.client['id'], body: {'balance': currentBal + amount});
@@ -664,13 +973,6 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text("خطأ: $e")));
     }
-  }
-
-  void _showEditReceiptDialog(Map<String, dynamic> rawRecord) {
-    // ... (نفس دالة التعديل السابقة)
-    // اختصاراً للكود سأفترض أنها موجودة كما في النسخة الأصلية
-    // يمكنك نسخ دالة _showEditReceiptDialog من الكود الأصلي هنا
-    // فهي تعمل بشكل جيد ولا تؤثر على أداء الليست فيو
   }
 
   void _showImage(String imageUrl) {
@@ -725,11 +1027,12 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       lastDate: DateTime(2030),
       initialDateRange: _dateRange,
     );
-    if (picked != null)
+    if (picked != null) {
       setState(() {
         _dateRange = picked;
         _loadDetails();
       });
+    }
   }
 
   @override
@@ -843,7 +1146,6 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                 ),
               ),
             ),
-
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -983,6 +1285,101 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                       ),
                                     ],
                                   ),
+                                  // ✅✅ هنا تظهر النقاط الثلاث للتعديل والحذف
+                                  if (isPayment &&
+                                      _canManagePayments &&
+                                      !isHeader) ...[
+                                    const SizedBox(width: 5),
+                                    SizedBox(
+                                      width: 30,
+                                      child: PopupMenuButton<String>(
+                                        padding: EdgeInsets.zero,
+                                        icon: Icon(
+                                          Icons.more_vert,
+                                          color: subText,
+                                        ),
+                                        onSelected: (val) {
+                                          if (val == 'edit') {
+                                            _showEditReceiptDialog(
+                                              item['rawRecord'],
+                                            );
+                                          } else if (val == 'delete') {
+                                            showDialog(
+                                              context: context,
+                                              builder: (c) => AlertDialog(
+                                                title: const Text("حذف السند"),
+                                                content: const Text(
+                                                  "هل أنت متأكد؟ سيتم إعادة المديونية للعميل.",
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(c),
+                                                    child: const Text("إلغاء"),
+                                                  ),
+                                                  ElevatedButton(
+                                                    style:
+                                                        ElevatedButton.styleFrom(
+                                                          backgroundColor:
+                                                              Colors.red,
+                                                        ),
+                                                    onPressed: () {
+                                                      Navigator.pop(c);
+                                                      _deleteReceipt(
+                                                        item['id'],
+                                                        (item['amount'] as num)
+                                                            .toDouble(),
+                                                      );
+                                                    },
+                                                    child: const Text(
+                                                      "حذف",
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          }
+                                        },
+                                        itemBuilder: (context) => [
+                                          const PopupMenuItem(
+                                            value: 'edit',
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.edit,
+                                                  color: Colors.blue,
+                                                  size: 18,
+                                                ),
+                                                SizedBox(width: 8),
+                                                Text("تعديل"),
+                                              ],
+                                            ),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'delete',
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.delete,
+                                                  color: Colors.red,
+                                                  size: 18,
+                                                ),
+                                                SizedBox(width: 8),
+                                                Text("حذف"),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ] else if (!isHeader) ...[
+                                    const SizedBox(
+                                      width: 35,
+                                    ), // مسافة فارغة للحفاظ على المحاذاة
+                                  ],
                                 ],
                               ),
                             ),
@@ -998,9 +1395,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
           ? Padding(
               padding: const EdgeInsets.only(bottom: 20, left: 10),
               child: FloatingActionButton.extended(
-                onPressed: () {
-                  _showAddPaymentDialog(context);
-                },
+                onPressed: () => _showAddPaymentDialog(context),
                 label: const Text(
                   "تسجيل دفعة",
                   style: TextStyle(color: Colors.white),
@@ -1013,7 +1408,6 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     );
   }
 
-  // ... (نفس دالة _showAddPaymentDialog القديمة بدون تغيير) ...
   void _showAddPaymentDialog(BuildContext context) {
     final amountCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
